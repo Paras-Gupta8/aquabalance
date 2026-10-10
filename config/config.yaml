@@ -33,6 +33,19 @@ paths:
   sensor_timeseries: data/synthetic/sensor_timeseries.csv   # only written with --sensor-noise
   summary: outputs/simulations/summary.csv
   network_config_json: outputs/simulations/network_config.json
+  # Phase 3 outputs
+  train_npz: data/processed/train.npz
+  val_npz: data/processed/val.npz
+  test_npz: data/processed/test.npz
+  feature_names: data/processed/feature_names.json
+  split_manifest: data/processed/split_manifest.csv
+  input_scaler: models/scalers/input_scaler.joblib
+  target_scaler: models/scalers/target_scaler.joblib
+  random_forest: models/trained/random_forest.joblib
+  baseline_metrics: outputs/reports/baseline_metrics.csv
+  baseline_error_analysis: outputs/reports/baseline_error_analysis.csv
+  fig_prediction_comparison: outputs/figures/baseline_prediction_comparison.png
+  fig_confusion_matrix: outputs/figures/baseline_confusion_matrix.png
 
 thresholds:
   p_min_m: 20.0                 # minimum acceptable junction pressure
@@ -207,3 +220,65 @@ scenarios:
       demand_level: [0.6, 1.0]
       pump_speed: [0.95, 1.0]
       valve_setting: [42, 55]
+
+# ----------------------------------------------------------------------------------------------
+# Phase 3: machine-learning dataset and baselines.
+# Task: from the last `window_steps` steps of sensor/control history, predict the pressure at
+# J2, J3 and J4 `horizon_steps` steps ahead (12 steps = 3 h of history, 1 step = 15 min ahead).
+# ----------------------------------------------------------------------------------------------
+ml:
+  window_steps: 12
+  horizon_steps: 1
+  target_nodes: [J2, J3, J4]
+
+  # Model inputs, in this order. hour_sin / hour_cos are computed from the timestamp of each step.
+  # A listed feature whose column is completely empty (tank_level: this network has no tank) is DROPPED
+  # and recorded in feature_names.json; nothing is invented to fill it ("zero" would fake a tank).
+  input_features:
+    - J1_pressure
+    - J2_pressure
+    - J3_pressure
+    - J4_pressure
+    - P1_flow
+    - P2_flow
+    - P3_flow
+    - P4_flow
+    - J2_demand
+    - J3_demand
+    - J4_demand
+    - tank_level
+    - reservoir_head
+    - pump_speed
+    - pump_status
+    - valve_setting
+    - valve_status
+    - hour_sin
+    - hour_cos
+  unavailable_feature_policy: drop    # drop | error
+  hour_fractional: true               # hour = hour + minute/60 (15-minute steps get distinct values)
+
+  # Hidden simulation truth. These may never be model inputs (they are not measurable by sensors).
+  forbidden_inputs: [leak_flag, leak_severity, scenario_type, scenario_id, timestamp]
+
+  split:
+    train: 0.70
+    val: 0.15
+    test: 0.15
+    seed: null                        # null = use project.seed
+    stratify_by_type: true            # keeps every scenario family in every split; still splits by whole scenario
+
+  random_forest:
+    predict_delta: true               # forest predicts (future - current pressure); the output is converted back to pressure
+    n_estimators: 150
+    min_samples_leaf: 2
+    max_features: 0.5
+    n_jobs: -1
+    lags: [1, 2, 3]                   # pressure lags (steps back) used as features
+    diff_steps: [1, 3]                # differences over this many steps (pressure, flow, demand)
+    rolling_windows: [4, 12]          # rolling mean / std windows (steps)
+
+  # Rule-based baseline: purely REACTIVE. It judges the pressures measured NOW against the thresholds;
+  # it does not forecast anything.
+  evaluation:
+    splits_reported: [train, val, test]
+    comparison_scenarios: 3           # scenarios drawn in the prediction-comparison figure

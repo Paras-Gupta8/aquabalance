@@ -163,3 +163,54 @@ def scenario_label(labelled: pd.DataFrame, priority: list[str] | tuple[str, ...]
         if label != "normal" and bool(labelled[label_to_flag[label]].any()):
             return label
     return "normal"
+
+
+# =============================================================================== pressure-only risk classes (Phase 3)
+# Leak/burst events are known simulation events, not something a pressure forecast can reveal. For the forecasting
+# baselines the risk class is therefore derived from the J2-J4 pressures alone, with the same configured thresholds.
+PRESSURE_RISK_CLASSES = ("normal", "low_pressure_risk", "high_pressure_risk", "pressure_imbalance")
+
+
+def pressure_risk_flags(pressures, nodes: list[str], settings: dict) -> pd.DataFrame:
+    """Low / high / imbalance flags from an (N, K) array of pressures whose columns are `nodes`.
+
+    Same rules and strict comparisons as compute_flags: low = any consumer junction below p_min or the critical
+    junction below its stricter minimum; high = any consumer junction above p_max; imbalance = spread above the maximum.
+    """
+    import numpy as np  # local import keeps the module header unchanged
+
+    p = np.asarray(pressures, dtype="float64")
+    if p.ndim != 2 or p.shape[1] != len(nodes):
+        raise LabelError(f"pressures must have shape (N, {len(nodes)}); got {p.shape}")
+    col = {n: i for i, n in enumerate(nodes)}
+    need = set(settings["label_junctions"]) | set(settings["spread_junctions"]) | {settings["critical_junction"]}
+    absent = sorted(need - set(col))
+    if absent:
+        raise LabelError(f"pressure array lacks junctions needed for the thresholds: {absent}")
+    label_p = p[:, [col[j] for j in settings["label_junctions"]]]
+    spread_p = p[:, [col[j] for j in settings["spread_junctions"]]]
+    spread = spread_p.max(axis=1) - spread_p.min(axis=1)
+    return pd.DataFrame({
+        "low_pressure_flag": ((label_p < settings["p_min_m"]).any(axis=1)
+                              | (p[:, col[settings["critical_junction"]]] < settings["critical_p_min_m"])).astype(int),
+        "high_pressure_flag": (label_p > settings["p_max_m"]).any(axis=1).astype(int),
+        "imbalance_flag": (spread > settings["max_spread_m"]).astype(int),
+    })
+
+
+def pressure_risk_classes(pressures, nodes: list[str], settings: dict):
+    """One class per row (normal / low_pressure_risk / high_pressure_risk / pressure_imbalance), using the
+    configured priority order restricted to the pressure-derived labels."""
+    import numpy as np
+
+    flags = pressure_risk_flags(pressures, nodes, settings)
+    flag_of = {"low_pressure_risk": "low_pressure_flag", "high_pressure_risk": "high_pressure_flag",
+               "pressure_imbalance": "imbalance_flag"}
+    out = np.full(len(flags), "normal", dtype=object)
+    done = np.zeros(len(flags), dtype=bool)
+    for label in settings["priority"]:
+        if label in flag_of:
+            hit = flags[flag_of[label]].to_numpy(dtype=bool) & ~done
+            out[hit] = label
+            done |= hit
+    return out

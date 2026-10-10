@@ -111,6 +111,38 @@ leak/burst events). The primary `risk_label` uses this priority: burst_like_even
 low_pressure_risk, high_pressure_risk, pressure_imbalance, normal. Pressure limits are applied to the consumer
 junctions J2-J4; the hub J1 has no customers and is not judged (`labels.label_junctions` in the config).
 
+## Run Phase 3: ML dataset and baselines
+
+Phase 3 turns the EPANET scenarios into a leakage-safe forecasting dataset and trains three simple baselines.
+There is **no deep learning yet** (the GRU comes in Phase 4).
+
+```bash
+python scripts/generate_synthetic_data.py --mode standard   # 300 scenarios (quick mode is too small for Phase 3)
+python scripts/build_ml_dataset.py
+python scripts/train_baselines.py
+python -m pytest tests -v
+```
+
+**Task:** previous 12 steps (3 h) -> pressure at J2, J3, J4 one step (15 min) ahead. Window, horizon, target nodes and
+features are set in `config/config.yaml` under `ml:`.
+
+**Leakage rules**
+- Scenarios are split as whole units (70/15/15, fixed seed, stratified by scenario type); `split_manifest.csv` records
+  the split and the code asserts no scenario is in two splits.
+- Sliding windows are cut inside one scenario only, never across a boundary.
+- Scalers are fitted on the training split only and saved with Joblib (`models/scalers/`).
+- `leak_flag`, `leak_severity`, `scenario_type` are never model inputs. They are kept only as `meta_*` arrays for analysis.
+- A feature that EPANET did not produce (here `tank_level`, the network has no tank) is dropped and recorded in
+  `feature_names.json`, not invented.
+
+**Baselines**
+1. Persistence: next pressure = current pressure.
+2. Rule-based: **reactive, not predictive.** It judges the current pressures against the thresholds.
+3. Random forest: multi-output, on lag/difference/rolling features; predicts the change from the current pressure.
+
+Outputs (generated, git-ignored): `data/processed/*.npz`, `models/scalers/*`, `models/trained/random_forest.joblib`,
+`outputs/reports/baseline_metrics.csv`, `outputs/reports/baseline_error_analysis.csv`, and two figures in `outputs/figures/`.
+
 ## Open the network in the EPANET GUI
 
 1. Install EPANET 2.2 from the US EPA website (https://www.epa.gov/water-research/epanet).
