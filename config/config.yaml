@@ -1,0 +1,66 @@
+# AquaBalance configuration.
+# Units: metres (m), litres per second (L/s) for demands, metres of head for pressure.
+# Every value below is read by the code; nothing is hard-coded in src/.
+
+project:
+  name: AquaBalance
+  seed: 42                      # global random seed (used from Phase 2 onward)
+
+simulation:
+  duration_hours: 24
+  hydraulic_timestep_min: 15
+  report_timestep_min: 15
+  headloss_formula: H-W         # Hazen-Williams
+  inp_flow_units: LPS           # units written into the .inp file (EPANET GUI shows these)
+
+paths:
+  base_inp: data/raw/aquabalance_base.inp
+  topology_figure: outputs/figures/network_topology.png
+  log_dir: outputs/logs
+
+thresholds:
+  p_min_m: 20.0                 # minimum acceptable junction pressure
+  p_max_m: 60.0                 # maximum acceptable junction pressure
+  max_pressure_spread_m: 20.0   # max allowed (highest - lowest) pressure across demand junctions (used from Phase 5)
+  critical_junction: J4         # hospital / critical service
+  critical_p_min_m: 30.0        # stricter minimum pressure for the critical junction
+
+network:
+  reservoir:
+    id: R1
+    head_m: 110.0
+    xy: [0, 100]                # schematic coordinates (figure + EPANET GUI map)
+
+  # JP1 and JV1 are zero-demand helper nodes: EPANET links (pump, valve) must connect two nodes,
+  # so the pump needs an outlet node and the valve needs an inlet node.
+  junctions:
+    - {id: J1,  role: hub,           elevation_m: 10.0, base_demand_lps: 0.0, xy: [320, 100],  description: Distribution hub}
+    - {id: J2,  role: demand,        elevation_m: 12.0, base_demand_lps: 1.4, xy: [620, 240],  description: Residential}
+    - {id: J3,  role: demand,        elevation_m: 20.0, base_demand_lps: 1.2, xy: [620, 100],  description: School}
+    - {id: J4,  role: demand,        elevation_m: 25.0, base_demand_lps: 1.1, xy: [620, -40],  description: Hospital / critical service}
+    - {id: JP1, role: pump_outlet,   elevation_m: 10.0, base_demand_lps: 0.0, xy: [130, 100],  description: Pump discharge node}
+    - {id: JV1, role: valve_inlet,   elevation_m: 12.0, base_demand_lps: 0.0, xy: [470, 170],  description: Valve inlet node}
+
+  pipes:
+    - {id: P1, from_node: JP1, to_node: J1,  length_m: 500.0, diameter_m: 0.30, roughness_hw: 120.0}
+    - {id: P2, from_node: J1,  to_node: JV1, length_m: 250.0, diameter_m: 0.20, roughness_hw: 120.0}
+    - {id: P3, from_node: J1,  to_node: J3,  length_m: 400.0, diameter_m: 0.15, roughness_hw: 120.0}
+    - {id: P4, from_node: J1,  to_node: J4,  length_m: 550.0, diameter_m: 0.15, roughness_hw: 120.0}
+
+  pump:
+    id: PU1
+    from_node: R1
+    to_node: JP1
+    curve_id: PU1_CURVE
+    # (flow L/s, head m) points: shut-off, design, maximum. Head must fall as flow rises.
+    head_curve_lps_m: [[0, 12.0], [5, 10.0], [10, 6.0]]
+    speed_default: 1.0            # relative speed (1.0 = nominal)
+
+  valve:
+    id: V1                        # sits on the J1 -> J2 branch (P2 then V1)
+    from_node: JV1
+    to_node: J2
+    type: PRV                     # pressure-reducing valve; setting = downstream pressure (m)
+    diameter_m: 0.20
+    setting_default: 50.0
+    minor_loss: 0.0

@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Generated artefacts (folders are kept via .gitkeep)
+data/synthetic/*
+data/processed/*
+models/trained/*
+models/scalers/*
+outputs/simulations/*
+outputs/logs/*
+outputs/reports/*
+!.gitkeep
+
+# EPANET scratch files
+*.rpt
+*.bin
+temp.*
