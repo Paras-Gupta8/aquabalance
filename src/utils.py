@@ -35,16 +35,18 @@ def load_config(path: str | Path | None = None) -> dict:
     return cfg
 
 
-def get_logger(name: str, log_dir: str | Path | None = None, level: int = logging.INFO) -> logging.Logger:
+def get_logger(name: str, log_dir: str | Path | None = None, level: int = logging.INFO,
+               console: bool = True) -> logging.Logger:
     """Return a logger that prints to the console and, if log_dir is given, to <log_dir>/<name>.log."""
     logger = logging.getLogger(name)
     logger.setLevel(level)
     if logger.handlers:  # already configured
         return logger
     fmt = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s", "%Y-%m-%d %H:%M:%S")
-    console = logging.StreamHandler()
-    console.setFormatter(fmt)
-    logger.addHandler(console)
+    if console:
+        stream = logging.StreamHandler()
+        stream.setFormatter(fmt)
+        logger.addHandler(stream)
     if log_dir is not None:
         folder = resolve_path(log_dir)
         folder.mkdir(parents=True, exist_ok=True)

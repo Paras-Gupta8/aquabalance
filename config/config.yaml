@@ -12,11 +12,27 @@ simulation:
   report_timestep_min: 15
   headloss_formula: H-W         # Hazen-Williams
   inp_flow_units: LPS           # units written into the .inp file (EPANET GUI shows these)
+  # Phase 2 scenario runs use EPANET 2.2 pressure-driven demand (PDD) so that starved nodes receive
+  # less water instead of producing absurd negative pressures. The base .inp keeps demand-driven (DDA).
+  demand_model: PDD
+  pdd_minimum_pressure_m: 0.0
+  pdd_required_pressure_m: 20.0
+  pdd_pressure_exponent: 0.5
+  start_datetime: "2026-01-05 00:00:00"   # nominal clock used for timestamps (a Monday)
 
 paths:
   base_inp: data/raw/aquabalance_base.inp
   topology_figure: outputs/figures/network_topology.png
   log_dir: outputs/logs
+  # Phase 2 outputs
+  scenario_metadata: data/synthetic/scenario_metadata.csv
+  raw_timeseries: data/synthetic/raw_timeseries.csv
+  labels: data/synthetic/labels.csv
+  demand_profiles: data/synthetic/demand_profiles.csv
+  scenario_specs: data/synthetic/scenario_specs.jsonl
+  sensor_timeseries: data/synthetic/sensor_timeseries.csv   # only written with --sensor-noise
+  summary: outputs/simulations/summary.csv
+  network_config_json: outputs/simulations/network_config.json
 
 thresholds:
   p_min_m: 20.0                 # minimum acceptable junction pressure
@@ -28,7 +44,10 @@ thresholds:
 network:
   reservoir:
     id: R1
-    head_m: 110.0
+    # Base head for normal operation. Phase 1 started at 110 m, but at 110 m every consumer junction
+    # (J2-J4) sits far above p_max, so no "normal" state exists. 110 m is still reached in Phase 2
+    # by the high_source_pressure scenarios (see scenarios.ranges).
+    head_m: 62.0
     xy: [0, 100]                # schematic coordinates (figure + EPANET GUI map)
 
   # JP1 and JV1 are zero-demand helper nodes: EPANET links (pump, valve) must connect two nodes,
@@ -64,3 +83,127 @@ network:
     diameter_m: 0.20
     setting_default: 50.0
     minor_loss: 0.0
+
+# ----------------------------------------------------------------------------------------------
+# Phase 2: labels. These are configurable LAB-PROTOTYPE thresholds, not universal standards.
+# Real utilities set their own service-pressure limits.
+# ----------------------------------------------------------------------------------------------
+labels:
+  label_junctions: [J2, J3, J4]   # consumer junctions. J1 is a hub with no customers, so it is not judged.
+  spread_junctions: [J2, J3, J4]  # pressure spread = max - min of these junctions at the same time step
+  leak_min_lps: 0.05              # a leak counts as "active" if EPANET leak outflow is at least this
+  burst_min_lps: 4.5              # realised leak outflow at or above this = burst-like, below = leak-like
+  # Primary label = first label in this list whose condition is true (labels are multi-label internally).
+  priority: [burst_like_event, leak_like_event, low_pressure_risk, high_pressure_risk, pressure_imbalance, normal]
+
+# Rows/scenarios that fail these checks are rejected, never silently kept.
+validation:
+  min_valid_pressure_m: -1.0
+  max_valid_pressure_m: 250.0
+
+# Optional sensor noise, added AFTER the hydraulic simulation to a COPY of the data (never to raw output).
+sensor_noise:
+  enabled: false
+  pressure_sd_m: 0.2
+  flow_relative_sd: 0.02
+
+# ----------------------------------------------------------------------------------------------
+# Phase 2: scenario generation. Random numbers choose the INPUTS (settings); every pressure and flow
+# value in the dataset is computed by EPANET from those settings.
+# ----------------------------------------------------------------------------------------------
+scenarios:
+  quick_n: 50
+  standard_n: 300
+  max_attempts_per_slot: 3        # a failed/rejected scenario is retried with a new seed this many times
+  steps: 96                       # 24 h at 15 min; the EPANET row at t = 24:00 is dropped
+
+  family_fractions:               # must sum to 1.0
+    normal: 0.42
+    high_demand_stress: 0.08
+    reduced_supply: 0.04
+    pump_degradation: 0.04
+    partial_blockage: 0.02
+    high_source_pressure: 0.17
+    valve_misconfiguration: 0.12
+    small_leak: 0.06
+    burst_leak: 0.05
+
+  demand_profile:
+    peak_shift_h: [-1.0, 1.0]     # shifts the daily peaks
+    amplitude_scale: [0.85, 1.15] # stretches/shrinks the daily shape
+    junction_jitter: [0.9, 1.1]   # per-junction demand level jitter
+    smooth_noise_sd: 0.05
+    smooth_noise_sigma_steps: 3.0 # smoothing width of the noise (steps)
+
+  head_drift:                     # slow +/- drift of the source head during the day
+    amplitude: 0.01
+    smooth_sigma_steps: 8.0
+
+  # Ranges are [low, high]. Heads in m, speeds relative to nominal (1.0), leaks in L/s at 50 m pressure.
+  ranges:
+    normal:
+      head: [56, 66]
+      demand_level: [0.8, 1.3]
+      pump_speed: [0.92, 1.0]
+      valve_setting: [42, 55]
+    high_demand_stress:           # peak demand together with a weaker source
+      head: [44, 54]
+      demand_level: [2.0, 2.6]
+      pump_speed: [0.9, 1.0]
+      valve_setting: [42, 55]
+    high_source_pressure:
+      head_variant_share: 0.7     # share of scenarios that use a high source head; the rest use a fast pump
+      head_variant: {head: [74, 110], pump_speed: [0.95, 1.05]}
+      pump_variant: {head: [64, 70], pump_speed: [1.2, 1.4]}
+      demand_level: [0.8, 1.3]
+      valve_setting: [42, 55]
+    valve_misconfiguration:
+      low_setting_share: 0.75     # PRV set far too low (starves J2, causes imbalance); rest set far too high
+      low_variant: {head: [60, 66], valve_setting: [14, 31]}
+      high_variant: {head: [64, 72], valve_setting: [70, 95]}
+      demand_level: [0.8, 1.3]
+      pump_speed: [0.92, 1.0]
+    reduced_supply:               # no tank exists in the network, so low supply = smooth drop in source head
+      head: [58, 64]
+      demand_level: [1.0, 1.6]
+      pump_speed: [0.9, 1.0]
+      valve_setting: [42, 55]
+      head_drop_fraction: [0.25, 0.40]
+      drop_start_h: [4, 16]
+      drop_duration_h: [3, 8]
+    pump_degradation:             # full pump stop is excluded: with no tank EPANET leaves the network undefined
+      gradual_share: 0.6          # gradual wear over the day; the rest is a temporary severe slow-down (trip)
+      head: [50, 58]
+      demand_level: [1.0, 1.6]
+      pump_speed: [0.95, 1.0]
+      valve_setting: [42, 55]
+      degrade_start_h: [0, 8]
+      degrade_end_speed: [0.3, 0.8]
+      trip_start_h: [6, 16]
+      trip_duration_h: [2, 6]
+      trip_floor_speed: [0.2, 0.4]
+    partial_blockage:             # blocked fraction of the pipe cross-section area
+      pipes: [P1, P3, P4]
+      blockage_factor: [0.88, 0.95]
+      head: [58, 66]
+      demand_level: [0.8, 1.3]
+      pump_speed: [0.92, 1.0]
+      valve_setting: [42, 55]
+    small_leak:
+      leak_nodes: [J1, J2, J3, J4]
+      leak_lps: [1.0, 3.0]
+      leak_start_h: [2, 18]
+      leak_duration_h: [2, 8]
+      head: [56, 66]
+      demand_level: [0.8, 1.3]
+      pump_speed: [0.92, 1.0]
+      valve_setting: [42, 55]
+    burst_leak:
+      leak_nodes: [J1, J2, J3, J4]
+      leak_lps: [6.5, 9.0]
+      leak_start_h: [2, 18]
+      leak_duration_h: [1, 6]
+      head: [58, 66]
+      demand_level: [0.6, 1.0]
+      pump_speed: [0.95, 1.0]
+      valve_setting: [42, 55]

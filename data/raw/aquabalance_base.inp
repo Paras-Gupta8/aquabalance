@@ -11,7 +11,7 @@
 
 [RESERVOIRS]
 ;ID                                   Head                  Pattern
- R1                               110                            ;
+ R1                                62                            ;
 
 [TANKS]
 ;ID                              Elevation           Init Level            Min Level            Max Level             Diameter           Min Volume Volume Curve         Overflow            
