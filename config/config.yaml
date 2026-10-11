@@ -59,6 +59,12 @@ paths:
   # Phase 5 outputs
   sample_risk_outputs: outputs/reports/sample_risk_outputs.json
   risk_engine_summary: outputs/reports/risk_engine_summary.csv
+  # Phase 6 outputs (EPANET simulated validation)
+  validation_results: outputs/simulations/recommendation_validation_results.csv
+  validation_candidates: outputs/simulations/recommendation_candidate_search.csv
+  recommendation_effectiveness: outputs/reports/recommendation_effectiveness.csv
+  fig_before_after_pressure: outputs/figures/before_after_pressure_comparison.png
+  fig_before_after_violations: outputs/figures/before_after_violation_comparison.png
 
 thresholds:
   p_min_m: 20.0                 # minimum acceptable junction pressure
@@ -367,3 +373,21 @@ recommendation:
     leak_like: 0.65
     burst_like: 0.80
     unreliable_forecast_penalty: 0.30
+
+# ----------------------------------------------------------------------------------------------
+# Phase 6: EPANET simulated validation of recommendations. Every candidate action is re-simulated in EPANET (WNTR
+# EpanetSimulator) on a fresh copy of the scenario; nothing is judged by the first-order estimate alone.
+# This validates the recommendation in the simulated EPANET network. It is not field validation in an actual water utility.
+# ----------------------------------------------------------------------------------------------
+epanet_validation:
+  horizon_steps: 4                    # steps judged after the decision (4 x 15 min = 1 h); the action is held for all of them
+  valve_candidates_pct: [-15, -10, -5, 0, 5, 10, 15]     # change of the PRV setting
+  pump_candidates_pct: [-10, -5, 0, 5, 10]               # change of the pump speed
+  # objective = high * (high-pressure violation node-steps) + low * (low-pressure violation node-steps)
+  #           + critical_j4 * (J4 critical-low node-steps) + imbalance * (imbalance steps)
+  #           + spread * (mean branch pressure spread, m) + adjustment * |control change| (percentage points)
+  penalties: {high_pressure: 10.0, low_pressure: 10.0, critical_j4: 1000.0, imbalance: 10.0, spread: 1.0, adjustment: 0.1}
+  j4_safety_margin_m: 0.5             # J4 may not be pushed below (critical minimum + margin); if it is already lower it may not drop at all
+  safe_tolerance_m: 0.05              # numerical slack when checking that no node got worse
+  min_improvement: 0.000001           # a change must lower the objective by more than this to count as an improvement
+  inspect_only_for: [leak_like_pattern, burst_like_pattern, uncertain]   # recommendation types that are never answered with a control change

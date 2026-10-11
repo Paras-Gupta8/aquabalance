@@ -26,6 +26,12 @@ import numpy as np
 
 from src.risk_engine import UNCERTAIN_LABEL, RiskAssessment, RiskSettings, _jsonable
 
+# ---- Phase 6: every recommendation is re-simulated in EPANET; these exact texts are part of the output contract ----
+VALIDATION_LABEL = "EPANET simulated validation"
+VALIDATION_DISCLAIMER = ("This validates the recommendation in the simulated EPANET network. "
+                         "It is not field validation in an actual water utility.")
+NO_SAFE_ACTION_MESSAGE = "No safe action found; operator inspection recommended."
+
 DISCLAIMER = ("Simulated decision-support suggestion only: no real equipment is controlled, and the estimate is a "
               "first-order approximation that must be tested in the EPANET model and reviewed by an operator.")
 
@@ -132,6 +138,7 @@ class Recommendation:
     alternatives_considered: list = field(default_factory=list)
     is_simulated_decision_support: bool = True
     controls_real_equipment: bool = False
+    validation: dict = field(default_factory=dict)      # filled by apply_validation (Phase 6)
 
     def to_dict(self) -> dict:
         return _jsonable({k: getattr(self, k) for k in self.__dataclass_fields__})
@@ -425,3 +432,44 @@ def _outside(c: _Candidate, s: RecommendationSettings) -> bool:
 def _join_nodes(names: list[str]) -> str:
     from src.risk_engine import _join
     return _join(names)
+
+
+# =============================================================================================== Phase 6: validated recommendation
+def apply_validation(rec: Recommendation, v: dict) -> Recommendation:
+    """Return the recommendation AFTER the EPANET simulated validation (`v` = result dict of epanet_validator).
+
+    * validated improvement -> the EPANET-chosen action replaces the first-order suggestion (it may be the same action);
+    * no safe action        -> conservative default whose rationale is exactly NO_SAFE_ACTION_MESSAGE;
+    * inspection / no action needed -> unchanged action, with the EPANET evidence attached.
+    The first-order estimate is never presented as verified: the numbers quoted come from the EPANET re-run.
+    """
+    import copy
+    out = copy.deepcopy(rec)
+    result = v["final_validation_result"]
+    b, a = v["before"], v["after"]
+    evidence = (f"{VALIDATION_LABEL}: over the next {v['window_steps']} steps (15 min each) low-pressure violations "
+                f"{b['low_pressure_violation_count']} -> {a['low_pressure_violation_count']}, high-pressure violations "
+                f"{b['high_pressure_violation_count']} -> {a['high_pressure_violation_count']}, mean branch spread "
+                f"{b['branch_pressure_spread_mean']:.1f} -> {a['branch_pressure_spread_mean']:.1f} m, J4 minimum "
+                f"{b['J4_pressure_min']:.1f} -> {a['J4_pressure_min']:.1f} m.")
+    out.validation = {"label": VALIDATION_LABEL, "result": result, "disclaimer": VALIDATION_DISCLAIMER,
+                      "chosen_action": v["chosen_action"], "final_message": v["final_message"]}
+    if result == "no_safe_action_found":
+        out.recommended_action_type, out.target_component = NO_ACTION_INSPECT, "network"
+        out.current_value = out.recommended_value = None
+        out.adjustment_percent = 0.0
+        out.rationale = NO_SAFE_ACTION_MESSAGE
+        out.expected_effect = evidence
+        out.confidence = round(min(out.confidence, 0.35), 2)
+    elif result == "validated_improvement":
+        act = v["chosen_action_detail"]
+        out.recommended_action_type = act["action_type"]
+        out.target_component, out.unit = act["component"], act["unit"]
+        out.current_value, out.recommended_value, out.adjustment_percent = act["current"], act["new"], act["pct"]
+        out.rationale = f"{rec.rationale} {evidence}"
+        out.expected_effect = evidence
+        out.confidence = round(max(out.confidence, 0.9 if v["after"]["problem_resolved"] else 0.7), 2)
+    else:                                                   # inspection recommended / no action needed
+        out.expected_effect = f"{out.expected_effect} {evidence}"
+    out.safety_note = f"{out.safety_note} {VALIDATION_DISCLAIMER}"
+    return out

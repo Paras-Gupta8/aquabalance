@@ -133,6 +133,10 @@ def build_scenario_model(spec: dict, cfg: dict, base_inp: str | Path):
 
     # valve setting (PRV downstream pressure target, metres)
     wn.get_link(ids["valve"]).initial_setting = float(spec["valve_setting"])
+    vc = spec.get("valve_change")      # Phase 6: a validated valve action, applied from start_s onward (absent in Phase 2 specs)
+    if vc:
+        wn.add_control("valve_action", Control(SimTimeCondition(wn, "=", int(vc["start_s"])),
+                                               ControlAction(wn.get_link(ids["valve"]), "setting", float(vc["setting"]))))
 
     # demand: smooth time-of-day multipliers per consumer junction
     for node_id, mult in spec["demand_multipliers"].items():

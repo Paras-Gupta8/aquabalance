@@ -197,6 +197,40 @@ setting into: `predicted_risk_label`, `low_pressure_nodes`, `high_pressure_nodes
   setting while regulating). It is an approximation, not a simulation. V1 serves only the J2 branch, so J3 and J4 can only be moved by the pump.
 - Confidence is a rule-based score from config, not a probability.
 
+## Run Phase 6: EPANET simulated validation
+
+Phase 6 checks every recommended pump/valve action by **rerunning the scenario in EPANET** (WNTR `EpanetSimulator`)
+on a fresh copy of `data/raw/aquabalance_base.inp`. Nothing is estimated: all before/after numbers are EPANET results.
+
+> This validates the recommendation in the simulated EPANET network. It is not field validation in an actual water utility.
+
+```bash
+git pull
+python scripts/validate_recommendation.py            # needs the trained GRU (Phase 4) and the Phase 2/3 data
+python scripts/validate_recommendation.py --scenario S0015 --step 51    # one case
+python -m pytest tests/test_epanet_validation.py -v
+```
+
+How one validation works (EPANET simulated validation):
+
+1. Reload the base `.inp` and re-apply the scenario (demand pattern, reservoir head, pump status/speed, valve setting,
+   leak or blockage; this network has no tank).
+2. Record the baseline EPANET metrics over the next hour (4 steps) after the decision.
+3. Try a bounded set of actions on copied networks: valve -15/-10/-5/0/+5/+10/+15 %, pump -10/-5/0/+5/+10 %.
+4. Score each with `objective = 10 x high-pressure violations + 10 x low-pressure violations + 1 x branch spread +
+   0.1 x |control change|` (plus very large penalties for any J4 critical violation and for imbalance steps).
+5. A candidate is rejected if it makes any node worse or pushes J4 below its safety floor (J4 is never sacrificed).
+   The lowest-change candidate with the best safe objective that also fixes the flagged problem is chosen.
+6. If none qualifies: `No safe action found; operator inspection recommended.`
+   Leak-like, burst-like and uncertain cases are inspection-only; no control is tried.
+
+Outputs: `outputs/simulations/recommendation_validation_results.csv` (before/after metrics, chosen action, final
+result), `outputs/simulations/recommendation_candidate_search.csv` (every candidate), `outputs/reports/recommendation_effectiveness.csv`,
+`outputs/figures/before_after_pressure_comparison.png`, `outputs/figures/before_after_violation_comparison.png`.
+
+Not every recommendation improves every scenario: results can be a partial improvement, "no safe action found",
+inspection only, or an engine false alarm that EPANET does not confirm. The tables report all of them.
+
 ## Open the network in the EPANET GUI
 
 1. Install EPANET 2.2 from the US EPA website (https://www.epa.gov/water-research/epanet).
