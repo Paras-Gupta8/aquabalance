@@ -167,6 +167,36 @@ Outputs (generated, git-ignored except figures): `models/trained/gru_best.pt` an
 Risk labels for scoring come from the true future EPANET pressure; a dashboard must derive risk from the **predicted**
 pressure only (`GRUPredictor.predict_risk_class`).
 
+## Run Phase 5: risk engine and recommendations
+
+Transparent rules on top of the GRU forecast. **Simulated decision support only: nothing controls real equipment, and the
+suggested changes are not yet tested in EPANET (that is Phase 6).**
+
+```bash
+python scripts/demo_risk_engine.py     # needs Phases 3-4: prints sample outputs from real EPANET test windows
+python -m pytest tests -v
+```
+
+**`src/risk_engine.py`** turns current pressures, the forecast pressures, recent flow and demand, pump speed and valve
+setting into: `predicted_risk_label`, `low_pressure_nodes`, `high_pressure_nodes`, `pressure_spread`,
+`pressure_imbalance_flag`, `possible_leak_pattern_flag`, `severity_score` (0-100) and a plain-language explanation.
+- High pressure: forecast > `thresholds.p_max_m`. Low: forecast < `p_min_m`. Imbalance: spread of J2-J4 > `max_pressure_spread_m`.
+- J4 is stricter: its minimum is `critical_p_min_m` (30 m), and a forecast within 2 m of it raises an early warning.
+- Leak-like pattern needs **both** a pressure drop **and** inflow minus metered demand above a tolerance (in these EPANET
+  data that difference is exactly zero without a leak). A mismatch with no pressure drop is reported as *uncertain*.
+- No hidden labels are ever inputs: the engine receives only sensor/control history and the forecast.
+
+**`src/recommendation_engine.py`** gives one bounded suggestion: `recommended_action_type`, `target_component`,
+`current_value`, `recommended_value`, `adjustment_percent` (negative = reduce), `rationale`, `safety_note`, `confidence`,
+`expected_effect`. Order of care: burst-like -> leak-like -> J4 critical low -> other low -> high -> imbalance.
+- Steps: valve +-5/10/15 %, pump +5/10 % up and 5 % down, always inside `recommendation.bounds`; the smallest step that
+  clears the problem wins, otherwise a partial improvement with lower confidence, otherwise "no action / inspect".
+- Leak-like: inspect, never a blind pump increase. Burst-like: urgent simulated inspection/isolation workflow, no automatic closure.
+- Uncertain or missing data: conservative "no action / inspect".
+- The "expected effect" is a first-order estimate (pump affinity law on the configured pump curve; the PRV V1 holds J2 at its
+  setting while regulating). It is an approximation, not a simulation. V1 serves only the J2 branch, so J3 and J4 can only be moved by the pump.
+- Confidence is a rule-based score from config, not a probability.
+
 ## Open the network in the EPANET GUI
 
 1. Install EPANET 2.2 from the US EPA website (https://www.epa.gov/water-research/epanet).

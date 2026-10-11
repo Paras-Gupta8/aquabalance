@@ -56,6 +56,9 @@ paths:
   fig_gru_prediction: outputs/figures/gru_prediction_vs_actual.png
   fig_gru_per_node: outputs/figures/gru_per_node_error.png
   fig_gru_confusion: outputs/figures/gru_risk_confusion_matrix.png
+  # Phase 5 outputs
+  sample_risk_outputs: outputs/reports/sample_risk_outputs.json
+  risk_engine_summary: outputs/reports/risk_engine_summary.csv
 
 thresholds:
   p_min_m: 20.0                 # minimum acceptable junction pressure
@@ -313,3 +316,54 @@ gru:
   device: auto                  # auto = GPU if available else CPU | cpu | cuda
   seed: null                    # null -> project.seed
   deterministic: true
+
+# ----------------------------------------------------------------------------------------------
+# Phase 5: transparent risk engine and bounded recommendation engine (simulated decision support only).
+# Every number below is a configurable LAB-PROTOTYPE value, not a utility standard. Nothing here controls real equipment.
+# ----------------------------------------------------------------------------------------------
+risk:
+  horizon_minutes: 15                 # wording only: "in the next 15-minute interval"
+  nodes: [J2, J3, J4]                 # nodes judged from the forecast
+  # Which metered pipe feeds which demand node (used for the flow-vs-demand consistency check).
+  inflow_pipe: P1                     # all supply passes through P1 (hub inflow)
+  branch_pipes: {J2: P2, J3: P3, J4: P4}
+  hub_node: J1
+  critical_warning_margin_m: 2.0      # J4 forecast within this margin above its critical minimum triggers an early-warning note
+  near_limit_margin_m: 5.0            # distance to a limit at which the "closeness" part of the severity score starts
+  trend_steps: 4                      # steps used for flow / demand trend slopes
+  # Leak-like pattern = pressure drop AND flow/demand inconsistency (mass balance: inflow - metered demand).
+  leak_residual_min_lps: 0.5          # inflow-minus-demand above this is inconsistent ...
+  leak_residual_rel_tol: 0.05         # ... and above this fraction of the inflow (sensor-noise tolerance)
+  burst_residual_min_lps: 4.5         # residual at or above this = burst-like (matches labels.burst_min_lps)
+  pressure_drop_min_m: 0.5            # pressure drop (window maximum minus now, or now minus forecast) that counts as a drop
+  pressure_drop_lookback_steps: 12    # history searched for the drop (the whole window)
+  max_forecast_change_m: 25.0         # a forecast further than this from the current pressure is treated as unreliable
+  tank_low_level_m: null              # set a level to enable a low-tank note; this network has no tank
+  severity:                           # each component is base + (100 - base) * min(1, size / scale), size in metres or L/s
+    low_pressure:      {base: 40, scale_m: 10.0}
+    critical_low_J4:   {base: 55, scale_m: 10.0}
+    high_pressure:     {base: 35, scale_m: 20.0}
+    imbalance:         {base: 30, scale_m: 20.0}
+    leak_like:         {base: 60, scale_lps: 6.0}
+    flow_inconsistency: {base: 40, scale_lps: 6.0}   # inflow/demand mismatch WITHOUT a pressure drop (uncertain)
+    burst_like:        {base: 90, scale_lps: 5.0}
+    closeness_max: 25                 # normal-but-close-to-a-limit scores up to this
+    others_weight: 0.15               # share of the other active components added on top of the largest
+
+recommendation:
+  bounds:                             # recommended values always stay inside these
+    pump_speed:      {min: 0.60, max: 1.10}     # relative to nominal 1.0
+    valve_setting_m: {min: 15.0, max: 90.0}     # PRV downstream pressure setting, metres
+  valve_adjust_pct: [5, 10, 15]       # allowed single-step valve changes (percent of the current setting)
+  pump_increase_pct: [5, 10]
+  pump_decrease_pct: [5]
+  target_margin_m: 0.5                # a fix must land at least this far inside the limit
+  regulating_tolerance_m: 0.5         # J2 within this of the PRV setting = valve is regulating
+  worsen_tolerance_m: 0.05            # a candidate may not make any node's violation worse by more than this
+  confidence:
+    resolves: 0.85
+    partial: 0.50
+    inspect: 0.35
+    leak_like: 0.65
+    burst_like: 0.80
+    unreliable_forecast_penalty: 0.30
