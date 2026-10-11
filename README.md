@@ -143,6 +143,30 @@ features are set in `config/config.yaml` under `ml:`.
 Outputs (generated, git-ignored): `data/processed/*.npz`, `models/scalers/*`, `models/trained/random_forest.joblib`,
 `outputs/reports/baseline_metrics.csv`, `outputs/reports/baseline_error_analysis.csv`, and two figures in `outputs/figures/`.
 
+## Run Phase 4: GRU pressure forecaster
+
+Pressure forecasting and decision support (simulation-based; nothing here controls a real network).
+
+```bash
+python scripts/train_gru.py            # needs Phase 3 first: build_ml_dataset.py and train_baselines.py
+python scripts/train_gru.py --epochs 5 # quick smoke run
+python -m pytest tests -v
+```
+
+**Model:** input `(batch, 12, 18)` sensor/control history -> GRU(64) -> dropout 0.20 -> GRU(32) -> final hidden state
+-> Dense(32)+ReLU -> 3 outputs (J2, J3, J4 pressure 15 min ahead). Adam, lr 0.001, Huber loss (`gru.loss: mse` to switch),
+batch 64, up to 100 epochs, early stopping (patience 10), ReduceLROnPlateau, seeded. CPU by default, GPU if available.
+The best checkpoint (lowest validation MAE) is saved and restored before any test evaluation. The network predicts the
+**change from the current pressure** and adds it back (`gru.predict_delta`), exactly like the random forest, so the
+comparison is fair. Scenario type, leak flags and leak severity are never inputs.
+
+Outputs (generated, git-ignored except figures): `models/trained/gru_best.pt` and `gru_config.json`,
+`outputs/reports/gru_metrics.json`, `model_comparison.csv`, `gru_error_by_scenario_type.csv`, and four figures
+(`gru_training_history`, `gru_prediction_vs_actual`, `gru_per_node_error`, `gru_risk_confusion_matrix`) in `outputs/figures/`.
+
+Risk labels for scoring come from the true future EPANET pressure; a dashboard must derive risk from the **predicted**
+pressure only (`GRUPredictor.predict_risk_class`).
+
 ## Open the network in the EPANET GUI
 
 1. Install EPANET 2.2 from the US EPA website (https://www.epa.gov/water-research/epanet).

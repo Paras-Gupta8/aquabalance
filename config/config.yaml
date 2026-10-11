@@ -46,6 +46,16 @@ paths:
   baseline_error_analysis: outputs/reports/baseline_error_analysis.csv
   fig_prediction_comparison: outputs/figures/baseline_prediction_comparison.png
   fig_confusion_matrix: outputs/figures/baseline_confusion_matrix.png
+  # Phase 4 outputs
+  gru_checkpoint: models/trained/gru_best.pt
+  gru_config: models/trained/gru_config.json
+  gru_metrics: outputs/reports/gru_metrics.json
+  model_comparison: outputs/reports/model_comparison.csv
+  gru_error_by_scenario_type: outputs/reports/gru_error_by_scenario_type.csv
+  fig_gru_history: outputs/figures/gru_training_history.png
+  fig_gru_prediction: outputs/figures/gru_prediction_vs_actual.png
+  fig_gru_per_node: outputs/figures/gru_per_node_error.png
+  fig_gru_confusion: outputs/figures/gru_risk_confusion_matrix.png
 
 thresholds:
   p_min_m: 20.0                 # minimum acceptable junction pressure
@@ -282,3 +292,24 @@ ml:
   evaluation:
     splits_reported: [train, val, test]
     comparison_scenarios: 3           # scenarios drawn in the prediction-comparison figure
+
+# Phase 4: the primary deep-learning model (pressure forecasting and decision support, not autonomous control)
+gru:
+  hidden_1: 64                  # first GRU layer
+  hidden_2: 32                  # second GRU layer (its final hidden state feeds the dense head)
+  dropout: 0.20                 # between the two GRU layers
+  dense: 32                     # dense layer with ReLU before the 3 outputs
+  predict_delta: true           # output = change from the current pressure (same trick as the random forest); false = absolute pressure
+  loss: huber                   # huber | mse
+  huber_delta: 1.0              # in standardised units
+  learning_rate: 0.001
+  batch_size: 64                # 32 or 64
+  max_epochs: 100
+  early_stopping_patience: 10
+  min_delta: 0.0              # smallest validation improvement that counts
+  checkpoint_metric: val_mae    # val_mae (metres) | val_loss
+  grad_clip: 1.0
+  scheduler: {factor: 0.5, patience: 4, min_lr: 0.00001}   # ReduceLROnPlateau on the checkpoint metric
+  device: auto                  # auto = GPU if available else CPU | cpu | cuda
+  seed: null                    # null -> project.seed
+  deterministic: true
