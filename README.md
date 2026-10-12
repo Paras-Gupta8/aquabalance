@@ -231,6 +231,38 @@ result), `outputs/simulations/recommendation_candidate_search.csv` (every candid
 Not every recommendation improves every scenario: results can be a partial improvement, "no safe action found",
 inspection only, or an engine false alarm that EPANET does not confirm. The tables report all of them.
 
+## Run Phase 7: dashboard (Streamlit)
+
+A minimal dashboard on top of the existing pipeline. It adds no new simulation, ML, risk or validation logic: it reads the
+saved EPANET data and trained models, runs the Phase 5 engines, and calls the Phase 6 EPANET simulated validation.
+
+> This is a simulation-based decision-support prototype, not autonomous real-world utility control. All data is synthetic
+> (EPANET/WNTR scenarios), not real utility data.
+
+```bash
+git pull
+pip install -r requirements.txt
+streamlit run app/app.py
+```
+
+What you see (one page, 8 sections): system overview cards, a network diagram (R1, PU1, J1-J4, P1-P4, V1; green = safe,
+amber = warning, red = high risk), pressure/flow/demand trends with the next-step forecast, AI prediction and risk
+analysis, the recommended action, **Before vs After EPANET simulated validation** (after you click the sidebar button),
+a model comparison table, and a plain-language methodology section.
+
+- **Models:** Persistence, Random Forest and GRU appear when available. LSTM and TCN are not implemented in this project, so they are not offered.
+  If PyTorch cannot be installed (for example on some Macs), the GRU is simply unavailable and everything else still works.
+- **Demo mode:** if the pipeline outputs (`data/synthetic/`, `models/trained/`) are not found, the app uses the small saved
+  example in `data/sample/` and labels it "Synthetic EPANET simulation example." It contains real EPANET output for 13 test-split scenarios and
+  the stored forecasts of the trained models for them. Force it with `AQUABALANCE_FORCE_DEMO=1 streamlit run app/app.py`.
+  Rebuild the sample after retraining with `python scripts/build_demo_sample.py`.
+- **No tank:** the network has no tank, so the tank-level panel says so instead of showing an invented value.
+- Validation outcomes: "Simulated improvement observed.", "Recommendation did not improve all constraints.",
+  "No safe action found; operator inspection recommended.", plus inspection-only / no-action-needed messages. Not every recommendation improves every scenario.
+- EPANET simulated validation: This validates the recommendation in the simulated EPANET network. It is not field validation in an actual water utility.
+
+Tests: `python -m pytest tests/test_app.py -v` (headless app tests in demo mode).
+
 ## Open the network in the EPANET GUI
 
 1. Install EPANET 2.2 from the US EPA website (https://www.epa.gov/water-research/epanet).
