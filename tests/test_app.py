@@ -53,6 +53,20 @@ def test_missing_data_gives_a_readable_error(cfg, tmp_path):
         dd.load_source(bad, force_demo=False, sample_dir=tmp_path / "empty")
 
 
+def _same_generation(cfg, src, sid):
+    """True when the locally generated dataset is the very run the demo sample was cut from (same scenario seed, type and source head)."""
+    import json
+    def seed_of(path):
+        for line in open(path, encoding="utf-8"):
+            d = json.loads(line)
+            if d["scenario_id"] == sid:
+                return (d["random_seed"], d["scenario_type"], d["reservoir_head"])
+    full = resolve_path(cfg["paths"]["scenario_specs"]) if "scenario_specs" in cfg["paths"] else None
+    if full is None or not full.exists():
+        return False
+    return seed_of(full) == seed_of(src.specs_path)
+
+
 def test_sample_values_are_real_epanet_output(cfg, demo):
     """The sample must be a subset of the real EPANET dataset, not made-up numbers."""
     src, _ = demo
@@ -61,6 +75,8 @@ def test_sample_values_are_real_epanet_output(cfg, demo):
         pytest.skip("full dataset not generated here")
     raw = pd.read_csv(full)
     sid = dd.scenario_ids(src)[0]
+    if not _same_generation(cfg, src, sid):
+        pytest.skip("local dataset was generated with different settings than the demo sample")
     a = raw[raw["scenario_id"] == sid]["J4_pressure"].to_numpy()
     b = src.timeseries[src.timeseries["scenario_id"] == sid]["J4_pressure"].to_numpy()
     assert np.allclose(a, b)
@@ -115,6 +131,8 @@ def test_stored_forecast_matches_the_live_model(cfg, demo):
     if live.info["random_forest"]["mode"] != "live":
         pytest.skip("random forest not trained here")
     sid = [i for i in dd.scenario_ids(src) if hub.can_forecast("random_forest", i)][0]
+    if not _same_generation(cfg, src, sid):
+        pytest.skip("local models/data differ from the ones the demo sample was cut from")
     a = dd.build_step_view(cfg, src, hub, sid, 40, "random_forest").forecast
     b = dd.build_step_view(cfg, full_src, live, sid, 40, "random_forest").forecast
     for n in a:
