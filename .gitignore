@@ -20,6 +20,12 @@ models/scalers/*
 outputs/simulations/*
 outputs/logs/*
 outputs/reports/*
+!outputs/reports/model_comparison.csv
+!outputs/reports/scenario_error_analysis.csv
+!outputs/reports/final_results_summary.md
+!outputs/reports/limitations.md
+!outputs/reports/viva_preparation.md
+!outputs/reports/recommendation_effectiveness_report.md
 !.gitkeep
 
 # EPANET scratch files

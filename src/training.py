@@ -115,7 +115,8 @@ def save_checkpoint(path: str | Path, model: GRUForecaster, meta: dict) -> None:
 
 # --------------------------------------------------------------------------- main entry
 def train_gru(gru_cfg: dict, data: dict, feature_names: list[str], nodes: list[str], input_mean, input_scale,
-              checkpoint_path: str | Path, seed: int, log=print, max_epochs: int | None = None) -> dict:
+              checkpoint_path: str | Path, seed: int, log=print, max_epochs: int | None = None,
+              model_type: str = "gru") -> dict:
     """Train on data['train'], pick the best checkpoint on data['val'], restore it and return a GRUPredictor.
 
     data[split] needs X (scaled windows), X_raw, y_raw. Returns {"predictor", "history", "best_epoch", ...}.
@@ -154,8 +155,13 @@ def train_gru(gru_cfg: dict, data: dict, feature_names: list[str], nodes: list[s
     gen = torch.Generator().manual_seed(int(seed))
     loader = DataLoader(TensorDataset(x_tr, z_tr), batch_size=batch_size, shuffle=True, generator=gen)
 
-    arch = architecture_from_config(gru_cfg)
-    model = GRUForecaster(len(feature_names), len(nodes), **arch).to(device)
+    if model_type == "gru":
+        arch = architecture_from_config(gru_cfg)
+        model = GRUForecaster(len(feature_names), len(nodes), **arch).to(device)
+    else:                                                     # Phase 8: same loop for the LSTM / TCN comparison models
+        from src.sequence_models import architecture_from_config as seq_arch, build_model
+        arch = seq_arch(model_type, gru_cfg)
+        model = build_model(model_type, len(feature_names), len(nodes), arch).to(device)
     n_params = sum(p.numel() for p in model.parameters())
     loss_fn = make_loss(gru_cfg.get("loss", "huber"), gru_cfg.get("huber_delta", 1.0))
     optimizer = torch.optim.Adam(model.parameters(), lr=float(gru_cfg["learning_rate"]))
@@ -166,13 +172,13 @@ def train_gru(gru_cfg: dict, data: dict, feature_names: list[str], nodes: list[s
 
     cur_va = np.asarray(data["val"]["X_raw"][:, -1, cols], "float64")
     y_va = np.asarray(data["val"]["y_raw"], "float64")
-    meta = {"architecture": arch, "num_features": len(feature_names), "feature_names": list(feature_names),
+    meta = {"model_type": model_type, "architecture": arch, "num_features": len(feature_names), "feature_names": list(feature_names),
             "target_nodes": list(nodes), "input_mean": [float(v) for v in np.asarray(input_mean).ravel()],
             "input_scale": [float(v) for v in np.asarray(input_scale).ravel()],
             "out_mean": [float(v) for v in out_mean], "out_std": [float(v) for v in out_std],
             "predict_delta": predict_delta, "window": int(data["train"]["X"].shape[1]), "seed": int(seed)}
 
-    log(f"GRU on {device}: {n_params:,} parameters, {len(x_tr):,} train / {len(x_va):,} validation windows, "
+    log(f"{model_type.upper()} on {device}: {n_params:,} parameters, {len(x_tr):,} train / {len(x_va):,} validation windows, "
         f"batch {batch_size}, loss {gru_cfg.get('loss', 'huber')}, lr {gru_cfg['learning_rate']}, "
         f"output = {'change from current pressure' if predict_delta else 'absolute pressure'}")
     log(f"{'epoch':>5} {'train_loss':>11} {'val_loss':>10} {'val_MAE_m':>10} {'lr':>9} {'sec':>6}")
@@ -214,7 +220,7 @@ def train_gru(gru_cfg: dict, data: dict, feature_names: list[str], nodes: list[s
     model.load_state_dict(best_state)                       # restore the best weights before any test evaluation
     log(f"Restored best checkpoint from epoch {best_epoch} ({metric_name} {best_value:.5f}).")
     predictor = GRUPredictor(model, feature_names, nodes, np.asarray(input_mean).ravel(), np.asarray(input_scale).ravel(),
-                             out_mean, out_std, predict_delta, device)
+                             out_mean, out_std, predict_delta, device, name=model_type)
     return {"predictor": predictor, "history": history, "best_epoch": best_epoch, "best_value": float(best_value),
             "checkpoint_metric": metric_name, "stopped_early": stopped_early, "epochs_run": len(history),
             "n_parameters": int(n_params), "device": str(device), "seed": int(seed),

@@ -1,7 +1,7 @@
 """Build the small saved EPANET example used by the dashboard's demo mode (data/sample/).
 
 Everything in the sample comes from the real pipeline: EPANET time series and scenario specs of a few TEST-split
-scenarios, plus the stored forecasts of the trained random forest and GRU for those scenarios (out-of-sample), and the
+scenarios, plus the stored forecasts of the trained random forest, GRU, LSTM and TCN for those scenarios (out-of-sample), and the
 real model-comparison table. Nothing is invented. Run it once after training (Phases 2-4):
 
     python scripts/build_demo_sample.py
@@ -59,9 +59,13 @@ def main() -> int:
     models = {"persistence": PersistenceBaseline(feats, nodes), "random_forest": RandomForestBaseline.load(P["random_forest"])}
     try:
         from src.gru_model import GRUPredictor
-        models["gru"] = GRUPredictor.from_checkpoint(P["gru_checkpoint"])
+        for name in ("gru", "lstm", "tcn"):                                    # whichever checkpoints exist
+            if Path(P[f"{name}_checkpoint"]).exists():
+                models[name] = GRUPredictor.from_checkpoint(P[f"{name}_checkpoint"])
+            else:
+                print(f"note: {name} checkpoint not found; not stored in the sample")
     except Exception as exc:                                                   # noqa: BLE001
-        print(f"note: GRU not stored in the sample ({exc})")
+        print(f"note: neural-network forecasts not stored in the sample ({exc})")
     rows = []
     for name, m in models.items():
         fc = m.predict(x)

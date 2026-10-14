@@ -80,11 +80,22 @@ def test_persistence_forecast_equals_the_current_pressure(cfg, demo):
         assert v.forecast[n] == pytest.approx(v.current_pressure[n], abs=1e-4)
 
 
-def test_unavailable_models_are_listed_not_faked(demo):
-    _, hub = demo
-    assert "lstm" in hub.unavailable() and "tcn" in hub.unavailable()
-    assert "lstm" not in hub.available() and "tcn" not in hub.available()
-    assert "persistence" in hub.available()
+def test_demo_offers_only_models_with_real_forecasts(demo):
+    """Every offered model is either live (persistence) or backed by stored forecasts of a TRAINED model; none is faked."""
+    src, hub = demo
+    stored = set(src.forecasts["model"].unique())
+    for m in hub.available():
+        assert m == "persistence" or m in stored
+    assert {"persistence", "random_forest", "gru"} <= set(hub.available())
+    for m, why in hub.unavailable().items():
+        assert m not in hub.available() and why
+
+
+def test_untrained_model_is_reported_unavailable_not_faked(cfg, demo, monkeypatch):
+    src, _ = demo
+    reduced = dd.DataSource(**{**src.__dict__, "forecasts": src.forecasts[src.forecasts["model"] != "tcn"]})
+    hub = dd.ModelHub(cfg, reduced)
+    assert "tcn" not in hub.available() and "tcn" in hub.unavailable()
 
 
 def test_forecast_never_uses_the_true_next_step(cfg, demo):
@@ -211,7 +222,7 @@ def test_sidebar_has_the_required_controls(app):
     assert any(b.label == "Run EPANET Simulated Validation" for b in app.sidebar.button)
     assert any("Help / Methodology" in e.label for e in app.sidebar.expander)
     model_widget = [w for w in app.sidebar.selectbox if w.label == "Forecast model"][0]
-    assert "LSTM" not in model_widget.options and "TCN" not in model_widget.options
+    assert {"Persistence", "Random Forest"} <= set(model_widget.options)
 
 
 def test_every_model_and_filter_runs_without_error(app):

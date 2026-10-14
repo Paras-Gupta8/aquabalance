@@ -33,7 +33,13 @@ SAMPLE_DIR = "data/sample"
 MODEL_NOTES = {"persistence": "next pressure = current pressure; no learning",
                "random_forest": "forest on lag/rolling features; predicts the change from the current pressure",
                "gru": "recurrent neural network on the last 3 hours of sensor values",
+               "lstm": "recurrent network (LSTM) with a parameter count close to the GRU",
+               "tcn": "causal dilated 1-D convolution network with residual blocks, parameter count close to the GRU",
                "rule_based_reactive": "threshold check on current pressures; does not forecast"}
+
+
+def dd_name(model: str) -> str:
+    return MODEL_NAMES.get(model, model)
 
 
 class DashboardError(RuntimeError):
@@ -142,9 +148,8 @@ class ModelHub:
         P = {k: resolve_path(v) for k, v in cfg["paths"].items()}
         self.info["persistence"] = {"mode": "live", "note": "next pressure = current pressure (no trained model needed)"}
         self._load_rf(P)
-        self._load_gru(P)
-        for name in ("lstm", "tcn"):
-            self.info[name] = {"mode": "unavailable", "note": "not implemented in this project"}
+        for name in ("gru", "lstm", "tcn"):
+            self._load_net(P, name)
         self._stored = set()
         if src.forecasts is not None:
             self._stored = set(src.forecasts["model"].unique())
@@ -165,16 +170,18 @@ class ModelHub:
             return
         self.info.setdefault("random_forest", {"mode": "unavailable", "note": "models/trained/random_forest.joblib not found"})
 
-    def _load_gru(self, P) -> None:
-        if not (self.src.mode == "full" and Path(P["gru_checkpoint"]).exists()):
-            self.info["gru"] = {"mode": "unavailable", "note": "models/trained/gru_best.pt not found"}
+    def _load_net(self, P, name: str) -> None:
+        """GRU / LSTM / TCN checkpoint -> live predictor. Needs PyTorch; any failure just makes the model unavailable."""
+        key = f"{name}_checkpoint"
+        if not (self.src.mode == "full" and key in P and Path(P[key]).exists()):
+            self.info[name] = {"mode": "unavailable", "note": f"models/trained/{name}_best.pt not found (train it first)"}
             return
         try:
             from src.gru_model import GRUPredictor            # needs PyTorch
-            self._live["gru"] = GRUPredictor.from_checkpoint(P["gru_checkpoint"])
-            self.info["gru"] = {"mode": "live", "note": "trained GRU loaded"}
+            self._live[name] = GRUPredictor.from_checkpoint(P[key])
+            self.info[name] = {"mode": "live", "note": f"trained {dd_name(name)} loaded"}
         except Exception as exc:                                                    # noqa: BLE001
-            self.info["gru"] = {"mode": "unavailable", "note": f"could not load GRU ({type(exc).__name__}: {exc})"}
+            self.info[name] = {"mode": "unavailable", "note": f"could not load {dd_name(name)} ({type(exc).__name__}: {exc})"}
 
     # ---- queries
     def available(self) -> list[str]:

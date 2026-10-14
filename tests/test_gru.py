@@ -13,6 +13,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import pytest  # noqa: E402
+
+pytest.importorskip("torch", reason="PyTorch is not installed (optional: pip install -r requirements-deep.txt)")
 import torch  # noqa: E402
 
 from src.evaluation import metric_verdicts, run_gru_experiment  # noqa: E402

@@ -317,7 +317,8 @@ else:
     st.dataframe(comp.round(3), hide_index=True, width="stretch",
                  column_config={"inference (ms / 1000 windows)": st.column_config.NumberColumn(format="%.2f")})
     st.caption(dd.comparison_summary(comp) + " Metrics come from the saved Phase 3-4 runs on synthetic EPANET scenarios held out by scenario ID. "
-               "Lower MAE/RMSE is better; higher macro F1 is better. LSTM and TCN were not implemented in this project.")
+               "Lower MAE/RMSE is better; higher macro F1 is better."
+               + ("" if {"lstm", "tcn"} <= set(comp["model"]) else " LSTM and TCN have not been trained in this run (python scripts/train_sequence_models.py)."))
 
 # =============================================================================================== 8. help
 st.header("8. Help and methodology")
@@ -334,12 +335,12 @@ st.markdown(f"""
 | **Pump (PU1)** | Adds pressure at the source. The recommendation can raise or lower its relative speed within small limits. |
 | **Valve (V1)** | A pressure-reducing valve on the branch to J2. Its setting is the pressure it holds downstream. |
 | **Leak-like event** | Pressure falling while the water entering the network exceeds the water customers use. The engine recommends inspection, never a control change, for these. |
-| **Deep learning** | A GRU network forecasts the next 15-minute pressure at J2–J4 from the last 3 hours. Risk labels and recommendations come from transparent rules applied to that forecast. |
+| **Deep learning** | A neural network (GRU; LSTM and TCN are compared with it) forecasts the next 15-minute pressure at J2–J4 from the last 3 hours. Risk labels and recommendations come from transparent rules applied to that forecast. |
 | **EPANET simulated validation** | The scenario is re-simulated in EPANET before and after each bounded candidate action; only a safe, measurably better action is accepted. |
 
 **Limitations**
 - All data is synthetic, from a small 4-junction teaching network with no tank. Thresholds are lab-prototype values, not utility standards.
-- Forecasts are one step (15 min) ahead. The simple models are strong on this data; the GRU does not beat the random forest here (see section 7).
+- Forecasts are one step (15 min) ahead. The simple models are strong on this data; section 7 shows the actual comparison of all models, with no model assumed best.
 - Validation covers the next hour only, in the same simulator that produced the data. {VALIDATION_DISCLAIMER}
 - Not every recommendation improves every scenario; some end with "No safe action found" or "inspection recommended".
 - No real-time sensor feed, no equipment control, no real utility data.

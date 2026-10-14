@@ -390,7 +390,7 @@ def model_comparison_table(metrics: pd.DataFrame) -> pd.DataFrame:
     cols = ["model", "split", "n_windows", "MAE", "RMSE", "R2", "MAE_J2", "MAE_J3", "MAE_J4",
             "mae_skill_vs_persistence", "risk_macro_precision", "risk_macro_recall", "risk_macro_f1", "risk_accuracy",
             "inference_ms_per_1000_windows"]
-    order = {"persistence": 0, "random_forest": 1, "gru": 2}
+    order = {"persistence": 0, "random_forest": 1, "gru": 2, "lstm": 3, "tcn": 4}
     table = metrics[[c for c in cols if c in metrics.columns]].copy()
     table["_o"] = table["model"].map(order)
     table["_s"] = table["split"].map({"train": 0, "val": 1, "test": 2})
@@ -406,7 +406,7 @@ def gru_error_by_scenario_type(result: dict, data: dict, nodes: list[str], split
         mask = np.ones(len(y), bool) if t == "all" else stype == t
         row = {"split": split, "scenario_type": t, "n_windows": int(mask.sum()),
                "n_scenarios": int(len(set(d["meta_scenario_id"][mask])))}
-        for name in ("persistence", "random_forest", "gru"):
+        for name in ("persistence", "random_forest", "gru", "lstm", "tcn"):
             if (name, split) not in result["preds"]:
                 continue
             err = np.abs(result["preds"][(name, split)][mask] - y[mask])
@@ -419,6 +419,31 @@ def gru_error_by_scenario_type(result: dict, data: dict, nodes: list[str], split
             row["gru_better_than_random_forest"] = bool(row["gru_MAE"] < row["random_forest_MAE"])
         rows.append(row)
     return pd.DataFrame(rows)
+
+
+def merge_keep_other_models(new: pd.DataFrame, path: str | Path, key: list[str]) -> pd.DataFrame:
+    """Keep what other experiments already wrote. Used so retraining the GRU never erases the LSTM/TCN rows (and vice versa).
+
+    Model-comparison table (rows): rows of models absent from `new` are kept. By-scenario table (columns): columns of
+    models absent from `new` are kept, matched on `key`.
+    """
+    path = Path(path)
+    if not path.exists():
+        return new
+    try:
+        old = pd.read_csv(path)
+    except Exception:                                                              # noqa: BLE001  unreadable -> overwrite
+        return new
+    if "model" in new.columns and "model" in old.columns:
+        keep = old[~old["model"].isin(set(new["model"]))]
+        out = pd.concat([new, keep], ignore_index=True)
+        order = {"persistence": 0, "rule_based_reactive": 1, "random_forest": 2, "gru": 3, "lstm": 4, "tcn": 5}
+        out["_o"], out["_s"] = out["model"].map(order).fillna(9), out["split"].map({"train": 0, "val": 1, "test": 2})
+        return out.sort_values(["_s", "_o"]).drop(columns=["_o", "_s"]).reset_index(drop=True)
+    extra = [c for c in old.columns if c not in new.columns and any(c.startswith(f"{m}_") for m in ("lstm", "tcn"))]
+    if not extra or not set(key) <= set(old.columns):
+        return new
+    return new.merge(old[key + extra], on=key, how="left")
 
 
 def single_window_latency_ms(predictor, x_raw: np.ndarray, repeats: int = 200) -> float:
@@ -605,6 +630,8 @@ def run_gru_experiment(cfg: dict, paths: dict | None = None, max_epochs: int | N
           "note": "risk labels are derived from the (predicted) future pressure with the configured thresholds; "
                   "true labels come from EPANET future pressure and are used for scoring only."}
     write_json(gm, P["gru_metrics"])
+    table = merge_keep_other_models(table, P["model_comparison"], ["model", "split"])
+    by_type = merge_keep_other_models(by_type, P["gru_error_by_scenario_type"], ["split", "scenario_type"])
     for path, frame in ((P["model_comparison"], table), (P["gru_error_by_scenario_type"], by_type)):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         frame.to_csv(path, index=False, float_format="%.6g")
@@ -621,3 +648,61 @@ def run_gru_experiment(cfg: dict, paths: dict | None = None, max_epochs: int | N
                                 "Test split, risk class from J2-J4 with the configured lab-prototype thresholds.")
     return {"fit": fit, "predictor": predictor, "metrics": metrics, "comparison": table, "verdict": verdict,
             "by_type": by_type, "paths": P, "result": result, "data": data, "gru_metrics": gm, "latency_ms": latency}
+
+
+# =============================================================================================== Phase 8: LSTM / TCN
+def run_sequence_experiment(cfg: dict, model_types=("lstm", "tcn"), paths: dict | None = None, max_epochs: int | None = None,
+                            seed: int | None = None, log=print, make_figures: bool = True, train: bool = True) -> dict:
+    """Train the LSTM / TCN exactly like the GRU (same data, splits, scalers, loss, optimiser, seed), then score EVERY
+    saved forecaster (persistence, random forest, GRU, LSTM, TCN) with the same code and rewrite the comparison tables.
+
+    The GRU checkpoint is only loaded, never retrained or overwritten. train=False only re-scores saved checkpoints.
+    """
+    from src.gru_model import GRUPredictor
+    from src.preprocessing import load_scalers, write_json
+    from src.training import train_gru
+
+    ml = cfg["ml"]
+    P = {k: resolve_path(v) for k, v in {**cfg["paths"], **(paths or {})}.items()}
+    for need in ("feature_names", "random_forest", "gru_checkpoint"):
+        if not Path(P[need]).exists():
+            raise DataError(f"{P[need]} not found. Run Phases 3-4 first (build_ml_dataset.py, train_baselines.py, train_gru.py)")
+    meta = json.loads(Path(P["feature_names"]).read_text(encoding="utf-8"))
+    features, nodes = meta["input_features"], list(ml["target_nodes"])
+    data = {s: load_split(P[f"{s}_npz"]) for s in ("train", "val", "test")}
+    in_scaler, _ = load_scalers(P["input_scaler"], P["target_scaler"])
+    fits, ck = {}, lambda t: P[f"{t}_checkpoint"]
+    for t in model_types:
+        section = {**cfg["gru"], **cfg[t]}                          # same training settings as the GRU unless overridden
+        seed_t = int(section["seed"] if section.get("seed") is not None else cfg["project"]["seed"]) if seed is None else int(seed)
+        if train:
+            fits[t] = train_gru(section, data, features, nodes, in_scaler.mean_, in_scaler.scale_, ck(t), seed_t, log=log,
+                                max_epochs=max_epochs, model_type=t)
+        elif not Path(ck(t)).exists():
+            raise DataError(f"{ck(t)} not found. Run: python scripts/train_sequence_models.py")
+
+    models = {"persistence": PersistenceBaseline(features, nodes), "random_forest": RandomForestBaseline.load(P["random_forest"]),
+              "gru": GRUPredictor.from_checkpoint(P["gru_checkpoint"], device="cpu")}
+    for t in ("lstm", "tcn"):
+        if Path(ck(t)).exists():
+            models[t] = GRUPredictor.from_checkpoint(ck(t), device="cpu")      # reloaded from the file: proves it works
+    result = evaluate_forecasters(models, data, label_settings(cfg), nodes, ["train", "val", "test"])
+    table = model_comparison_table(result["metrics"])
+    by_type = gru_error_by_scenario_type(result, data, nodes, "test")
+    for path, frame in ((P["model_comparison"], table), (P["gru_error_by_scenario_type"], by_type)):
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        frame.to_csv(path, index=False, float_format="%.6g")
+    for t, fit in fits.items():
+        m = result["metrics"]
+        write_json({"model": t, "architecture": fit["meta"]["architecture"], "n_parameters": fit["n_parameters"],
+                    "training": {k: fit[k] for k in ("best_epoch", "best_value", "checkpoint_metric", "stopped_early",
+                                                     "epochs_run", "device", "seed", "train_seconds")},
+                    "metrics": {sp: {k: (float(v) if isinstance(v, (int, float, np.floating, np.integer)) else v)
+                                     for k, v in m[(m["model"] == t) & (m["split"] == sp)].iloc[0].to_dict().items() if k != "model"}
+                                for sp in ("train", "val", "test")},
+                    "history": fit["history"],
+                    "note": "trained with the same data, scenario-level split, scalers, loss, optimiser, seed and early stopping as the GRU"},
+                   P[f"{t}_metrics"])
+        if make_figures:
+            plot_training_history(fit["history"], fit["best_epoch"], P[f"fig_{t}_history"], fit["checkpoint_metric"])
+    return {"fits": fits, "models": models, "result": result, "comparison": table, "by_type": by_type, "paths": P, "data": data}

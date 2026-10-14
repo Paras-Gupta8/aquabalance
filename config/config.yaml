@@ -65,6 +65,18 @@ paths:
   recommendation_effectiveness: outputs/reports/recommendation_effectiveness.csv
   fig_before_after_pressure: outputs/figures/before_after_pressure_comparison.png
   fig_before_after_violations: outputs/figures/before_after_violation_comparison.png
+  # Phase 8 outputs
+  lstm_checkpoint: models/trained/lstm_best.pt
+  tcn_checkpoint: models/trained/tcn_best.pt
+  lstm_metrics: outputs/reports/lstm_metrics.json
+  tcn_metrics: outputs/reports/tcn_metrics.json
+  fig_lstm_history: outputs/figures/lstm_training_history.png
+  fig_tcn_history: outputs/figures/tcn_training_history.png
+  final_figures_dir: outputs/final_figures
+  scenario_error_analysis: outputs/reports/scenario_error_analysis.csv
+  final_results_summary: outputs/reports/final_results_summary.md
+  limitations: outputs/reports/limitations.md
+  viva_preparation: outputs/reports/viva_preparation.md
 
 thresholds:
   p_min_m: 20.0                 # minimum acceptable junction pressure
@@ -322,6 +334,24 @@ gru:
   device: auto                  # auto = GPU if available else CPU | cpu | cuda
   seed: null                    # null -> project.seed
   deterministic: true
+
+# ----------------------------------------------------------------------------------------------
+# Phase 8: comparison models. Training settings (loss, lr, batch size, patience, seed, scheduler ...) are inherited from the
+# `gru:` section above, so the three networks are trained identically; only the architecture differs.
+# Sizes are chosen so the parameter counts are close (GRU 26,691 / LSTM 26,723 / TCN ~26k).
+# ----------------------------------------------------------------------------------------------
+lstm:
+  hidden_1: 56
+  hidden_2: 26
+  dropout: 0.20
+  dense: 32
+
+tcn:                            # causal dilated Conv1D residual blocks; receptive field 1 + 2*(k-1)*sum(dilations) = 29 steps
+  channels: 38
+  kernel_size: 3
+  dilations: [1, 2, 4]
+  dropout: 0.10
+  dense: 32
 
 # ----------------------------------------------------------------------------------------------
 # Phase 5: transparent risk engine and bounded recommendation engine (simulated decision support only).

@@ -70,11 +70,10 @@ def pick_device(name: str = "auto") -> torch.device:
 class GRUPredictor:
     """Forecast pressure (metres) from raw, unscaled windows of shape (N, W, F)."""
 
-    name = "gru"
-
-    def __init__(self, model: GRUForecaster, feature_names: list[str], target_nodes: list[str],
+    def __init__(self, model: nn.Module, feature_names: list[str], target_nodes: list[str],
                  input_mean: np.ndarray, input_scale: np.ndarray, out_mean: np.ndarray, out_std: np.ndarray,
-                 predict_delta: bool, device: torch.device | str = "cpu", batch_size: int = 2048):
+                 predict_delta: bool, device: torch.device | str = "cpu", batch_size: int = 2048, name: str = "gru"):
+        self.name = name                       # "gru" by default; "lstm" / "tcn" for the Phase 8 comparison models
         self.model = model.to(device).eval()
         self.feature_names, self.target_nodes = list(feature_names), list(target_nodes)
         self.input_mean = np.asarray(input_mean, "float64")
@@ -133,8 +132,13 @@ class GRUPredictor:
             raise FileNotFoundError(f"{path} not found. Run: python scripts/train_gru.py")
         ck = torch.load(path, map_location="cpu", weights_only=True)
         arch = ck["architecture"]
-        model = GRUForecaster(ck["num_features"], len(ck["target_nodes"]), **arch)
+        mtype = ck.get("model_type", "gru")                # checkpoints written before Phase 8 are GRUs
+        if mtype == "gru":
+            model = GRUForecaster(ck["num_features"], len(ck["target_nodes"]), **arch)
+        else:
+            from src.sequence_models import build_model
+            model = build_model(mtype, ck["num_features"], len(ck["target_nodes"]), arch)
         model.load_state_dict(ck["model_state"])
         return cls(model, ck["feature_names"], ck["target_nodes"], np.array(ck["input_mean"]),
                    np.array(ck["input_scale"]), np.array(ck["out_mean"]), np.array(ck["out_std"]),
-                   ck["predict_delta"], device)
+                   ck["predict_delta"], device, name=mtype)
