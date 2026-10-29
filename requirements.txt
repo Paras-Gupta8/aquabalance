@@ -1,0 +1,14 @@
+# Core packages (everything except the neural networks). Install with:  python -m pip install -r requirements.txt
+# WNTR runs EPANET; it needs setuptools < 81 because it imports pkg_resources.
+setuptools<81
+wntr
+pandas
+numpy
+pyyaml
+matplotlib
+plotly
+pytest
+scikit-learn
+streamlit
+joblib
+# The deep-learning models need PyTorch: python -m pip install -r requirements-deep.txt  (optional; see README Troubleshooting)

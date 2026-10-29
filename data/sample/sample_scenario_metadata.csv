@@ -1,0 +1,14 @@
+scenario_id,scenario_type,random_seed,reservoir_head,tank_initial_level,pump_speed,pump_schedule,valve_setting,leak_node,leak_start_time,leak_end_time,leak_severity,blockage_pipe,blockage_factor,demand_profile_id,notes
+S0015,partial_blockage,899174498,62.64,,0.9503,constant,44.773,,,,0.0,P3,0.8895,DP0015,89% of P3 cross-section blocked
+S0051,normal,2514928808,64.787,,0.9408,constant,44.396,,,,0.0,,,DP0051,normal operation within the safe envelope
+S0056,normal,4111037625,63.222,,0.9724,constant,49.509,,,,0.0,,,DP0056,normal operation within the safe envelope
+S0060,reduced_supply,2184701795,63.629,,0.9626,constant,48.918,,,,0.0,,,DP0060,no tank in the network: reduced supply modelled as a 30% source-head drop from 8.75 h to 15 h
+S0077,valve_misconfiguration,2424691521,60.399,,0.9224,constant,23.094,,,,0.0,,,DP0077,valve setting far too low (starves J2)
+S0083,small_leak,4183508033,59.832,,0.9432,constant,53.382,J2,16.75,19.0,2.879,,,DP0083,"leak at J2, 2.9 L/s at 50 m"
+S0105,high_demand_stress,3641373783,53.043,,0.9175,constant,53.643,,,,0.0,,,DP0105,normal operation within the safe envelope
+S0113,high_source_pressure,1652453334,93.03,,0.9803,constant,47.583,,,,0.0,,,DP0113,excess source head
+S0128,valve_misconfiguration,429508419,64.938,,0.9703,constant,23.594,,,,0.0,,,DP0128,valve setting far too low (starves J2)
+S0140,pump_degradation,2640198978,52.01,,0.985,slow-down to 0.37 from 14.75h to 20h,52.271,,,,0.0,,,DP0140,"temporary severe pump slow-down (a full stop is excluded: no tank, EPANET leaves the isolated network undefined)"
+S0147,high_source_pressure,1920028499,98.259,,1.0232,constant,46.34,,,,0.0,,,DP0147,excess source head
+S0158,burst_leak,2178912809,63.931,,0.992,constant,49.132,J1,2.5,4.25,6.667,,,DP0158,"leak at J1, 6.7 L/s at 50 m"
+S0176,small_leak,3189710654,56.097,,0.9373,constant,47.493,J4,10.5,18.25,2.364,,,DP0176,"leak at J4, 2.4 L/s at 50 m"

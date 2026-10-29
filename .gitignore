@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Generated artefacts (folders are kept via .gitkeep)
+data/synthetic/*
+data/processed/*
+models/trained/*
+models/scalers/*
+outputs/simulations/*
+outputs/logs/*
+outputs/reports/*
+!outputs/reports/model_comparison.csv
+!outputs/reports/scenario_error_analysis.csv
+!outputs/reports/final_results_summary.md
+!outputs/reports/limitations.md
+!outputs/reports/viva_preparation.md
+!outputs/reports/recommendation_effectiveness_report.md
+!.gitkeep
+
+# EPANET scratch files
+*.rpt
+*.bin
+temp.*

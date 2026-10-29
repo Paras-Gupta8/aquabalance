@@ -1,0 +1,423 @@
+# AquaBalance configuration.
+# Units: metres (m), litres per second (L/s) for demands, metres of head for pressure.
+# Every value below is read by the code; nothing is hard-coded in src/.
+
+project:
+  name: AquaBalance
+  seed: 42                      # global random seed (used from Phase 2 onward)
+
+simulation:
+  duration_hours: 24
+  hydraulic_timestep_min: 15
+  report_timestep_min: 15
+  headloss_formula: H-W         # Hazen-Williams
+  inp_flow_units: LPS           # units written into the .inp file (EPANET GUI shows these)
+  # Phase 2 scenario runs use EPANET 2.2 pressure-driven demand (PDD) so that starved nodes receive
+  # less water instead of producing absurd negative pressures. The base .inp keeps demand-driven (DDA).
+  demand_model: PDD
+  pdd_minimum_pressure_m: 0.0
+  pdd_required_pressure_m: 20.0
+  pdd_pressure_exponent: 0.5
+  start_datetime: "2026-01-05 00:00:00"   # nominal clock used for timestamps (a Monday)
+
+paths:
+  base_inp: data/raw/aquabalance_base.inp
+  topology_figure: outputs/figures/network_topology.png
+  log_dir: outputs/logs
+  # Phase 2 outputs
+  scenario_metadata: data/synthetic/scenario_metadata.csv
+  raw_timeseries: data/synthetic/raw_timeseries.csv
+  labels: data/synthetic/labels.csv
+  demand_profiles: data/synthetic/demand_profiles.csv
+  scenario_specs: data/synthetic/scenario_specs.jsonl
+  sensor_timeseries: data/synthetic/sensor_timeseries.csv   # only written with --sensor-noise
+  summary: outputs/simulations/summary.csv
+  network_config_json: outputs/simulations/network_config.json
+  # Phase 3 outputs
+  train_npz: data/processed/train.npz
+  val_npz: data/processed/val.npz
+  test_npz: data/processed/test.npz
+  feature_names: data/processed/feature_names.json
+  split_manifest: data/processed/split_manifest.csv
+  input_scaler: models/scalers/input_scaler.joblib
+  target_scaler: models/scalers/target_scaler.joblib
+  random_forest: models/trained/random_forest.joblib
+  baseline_metrics: outputs/reports/baseline_metrics.csv
+  baseline_error_analysis: outputs/reports/baseline_error_analysis.csv
+  fig_prediction_comparison: outputs/figures/baseline_prediction_comparison.png
+  fig_confusion_matrix: outputs/figures/baseline_confusion_matrix.png
+  # Phase 4 outputs
+  gru_checkpoint: models/trained/gru_best.pt
+  gru_config: models/trained/gru_config.json
+  gru_metrics: outputs/reports/gru_metrics.json
+  model_comparison: outputs/reports/model_comparison.csv
+  gru_error_by_scenario_type: outputs/reports/gru_error_by_scenario_type.csv
+  fig_gru_history: outputs/figures/gru_training_history.png
+  fig_gru_prediction: outputs/figures/gru_prediction_vs_actual.png
+  fig_gru_per_node: outputs/figures/gru_per_node_error.png
+  fig_gru_confusion: outputs/figures/gru_risk_confusion_matrix.png
+  # Phase 5 outputs
+  sample_risk_outputs: outputs/reports/sample_risk_outputs.json
+  risk_engine_summary: outputs/reports/risk_engine_summary.csv
+  # Phase 6 outputs (EPANET simulated validation)
+  validation_results: outputs/simulations/recommendation_validation_results.csv
+  validation_candidates: outputs/simulations/recommendation_candidate_search.csv
+  recommendation_effectiveness: outputs/reports/recommendation_effectiveness.csv
+  fig_before_after_pressure: outputs/figures/before_after_pressure_comparison.png
+  fig_before_after_violations: outputs/figures/before_after_violation_comparison.png
+  # Phase 8 outputs
+  lstm_checkpoint: models/trained/lstm_best.pt
+  tcn_checkpoint: models/trained/tcn_best.pt
+  lstm_metrics: outputs/reports/lstm_metrics.json
+  tcn_metrics: outputs/reports/tcn_metrics.json
+  fig_lstm_history: outputs/figures/lstm_training_history.png
+  fig_tcn_history: outputs/figures/tcn_training_history.png
+  final_figures_dir: outputs/final_figures
+  scenario_error_analysis: outputs/reports/scenario_error_analysis.csv
+  final_results_summary: outputs/reports/final_results_summary.md
+  limitations: outputs/reports/limitations.md
+  viva_preparation: outputs/reports/viva_preparation.md
+
+thresholds:
+  p_min_m: 20.0                 # minimum acceptable junction pressure
+  p_max_m: 60.0                 # maximum acceptable junction pressure
+  max_pressure_spread_m: 20.0   # max allowed (highest - lowest) pressure across demand junctions (used from Phase 5)
+  critical_junction: J4         # hospital / critical service
+  critical_p_min_m: 30.0        # stricter minimum pressure for the critical junction
+
+network:
+  reservoir:
+    id: R1
+    # Base head for normal operation. Phase 1 started at 110 m, but at 110 m every consumer junction
+    # (J2-J4) sits far above p_max, so no "normal" state exists. 110 m is still reached in Phase 2
+    # by the high_source_pressure scenarios (see scenarios.ranges).
+    head_m: 62.0
+    xy: [0, 100]                # schematic coordinates (figure + EPANET GUI map)
+
+  # JP1 and JV1 are zero-demand helper nodes: EPANET links (pump, valve) must connect two nodes,
+  # so the pump needs an outlet node and the valve needs an inlet node.
+  junctions:
+    - {id: J1,  role: hub,           elevation_m: 10.0, base_demand_lps: 0.0, xy: [320, 100],  description: Distribution hub}
+    - {id: J2,  role: demand,        elevation_m: 12.0, base_demand_lps: 1.4, xy: [620, 240],  description: Residential}
+    - {id: J3,  role: demand,        elevation_m: 20.0, base_demand_lps: 1.2, xy: [620, 100],  description: School}
+    - {id: J4,  role: demand,        elevation_m: 25.0, base_demand_lps: 1.1, xy: [620, -40],  description: Hospital / critical service}
+    - {id: JP1, role: pump_outlet,   elevation_m: 10.0, base_demand_lps: 0.0, xy: [130, 100],  description: Pump discharge node}
+    - {id: JV1, role: valve_inlet,   elevation_m: 12.0, base_demand_lps: 0.0, xy: [470, 170],  description: Valve inlet node}
+
+  pipes:
+    - {id: P1, from_node: JP1, to_node: J1,  length_m: 500.0, diameter_m: 0.30, roughness_hw: 120.0}
+    - {id: P2, from_node: J1,  to_node: JV1, length_m: 250.0, diameter_m: 0.20, roughness_hw: 120.0}
+    - {id: P3, from_node: J1,  to_node: J3,  length_m: 400.0, diameter_m: 0.15, roughness_hw: 120.0}
+    - {id: P4, from_node: J1,  to_node: J4,  length_m: 550.0, diameter_m: 0.15, roughness_hw: 120.0}
+
+  pump:
+    id: PU1
+    from_node: R1
+    to_node: JP1
+    curve_id: PU1_CURVE
+    # (flow L/s, head m) points: shut-off, design, maximum. Head must fall as flow rises.
+    head_curve_lps_m: [[0, 12.0], [5, 10.0], [10, 6.0]]
+    speed_default: 1.0            # relative speed (1.0 = nominal)
+
+  valve:
+    id: V1                        # sits on the J1 -> J2 branch (P2 then V1)
+    from_node: JV1
+    to_node: J2
+    type: PRV                     # pressure-reducing valve; setting = downstream pressure (m)
+    diameter_m: 0.20
+    setting_default: 50.0
+    minor_loss: 0.0
+
+# ----------------------------------------------------------------------------------------------
+# Phase 2: labels. These are configurable LAB-PROTOTYPE thresholds, not universal standards.
+# Real utilities set their own service-pressure limits.
+# ----------------------------------------------------------------------------------------------
+labels:
+  label_junctions: [J2, J3, J4]   # consumer junctions. J1 is a hub with no customers, so it is not judged.
+  spread_junctions: [J2, J3, J4]  # pressure spread = max - min of these junctions at the same time step
+  leak_min_lps: 0.05              # a leak counts as "active" if EPANET leak outflow is at least this
+  burst_min_lps: 4.5              # realised leak outflow at or above this = burst-like, below = leak-like
+  # Primary label = first label in this list whose condition is true (labels are multi-label internally).
+  priority: [burst_like_event, leak_like_event, low_pressure_risk, high_pressure_risk, pressure_imbalance, normal]
+
+# Rows/scenarios that fail these checks are rejected, never silently kept.
+validation:
+  min_valid_pressure_m: -1.0
+  max_valid_pressure_m: 250.0
+
+# Optional sensor noise, added AFTER the hydraulic simulation to a COPY of the data (never to raw output).
+sensor_noise:
+  enabled: false
+  pressure_sd_m: 0.2
+  flow_relative_sd: 0.02
+
+# ----------------------------------------------------------------------------------------------
+# Phase 2: scenario generation. Random numbers choose the INPUTS (settings); every pressure and flow
+# value in the dataset is computed by EPANET from those settings.
+# ----------------------------------------------------------------------------------------------
+scenarios:
+  quick_n: 50
+  standard_n: 300
+  max_attempts_per_slot: 3        # a failed/rejected scenario is retried with a new seed this many times
+  steps: 96                       # 24 h at 15 min; the EPANET row at t = 24:00 is dropped
+
+  family_fractions:               # must sum to 1.0
+    normal: 0.42
+    high_demand_stress: 0.08
+    reduced_supply: 0.04
+    pump_degradation: 0.04
+    partial_blockage: 0.02
+    high_source_pressure: 0.17
+    valve_misconfiguration: 0.12
+    small_leak: 0.06
+    burst_leak: 0.05
+
+  demand_profile:
+    peak_shift_h: [-1.0, 1.0]     # shifts the daily peaks
+    amplitude_scale: [0.85, 1.15] # stretches/shrinks the daily shape
+    junction_jitter: [0.9, 1.1]   # per-junction demand level jitter
+    smooth_noise_sd: 0.05
+    smooth_noise_sigma_steps: 3.0 # smoothing width of the noise (steps)
+
+  head_drift:                     # slow +/- drift of the source head during the day
+    amplitude: 0.01
+    smooth_sigma_steps: 8.0
+
+  # Ranges are [low, high]. Heads in m, speeds relative to nominal (1.0), leaks in L/s at 50 m pressure.
+  ranges:
+    normal:
+      head: [56, 66]
+      demand_level: [0.8, 1.3]
+      pump_speed: [0.92, 1.0]
+      valve_setting: [42, 55]
+    high_demand_stress:           # peak demand together with a weaker source
+      head: [44, 54]
+      demand_level: [2.0, 2.6]
+      pump_speed: [0.9, 1.0]
+      valve_setting: [42, 55]
+    high_source_pressure:
+      head_variant_share: 0.7     # share of scenarios that use a high source head; the rest use a fast pump
+      head_variant: {head: [74, 110], pump_speed: [0.95, 1.05]}
+      pump_variant: {head: [64, 70], pump_speed: [1.2, 1.4]}
+      demand_level: [0.8, 1.3]
+      valve_setting: [42, 55]
+    valve_misconfiguration:
+      low_setting_share: 0.75     # PRV set far too low (starves J2, causes imbalance); rest set far too high
+      low_variant: {head: [60, 66], valve_setting: [14, 31]}
+      high_variant: {head: [64, 72], valve_setting: [70, 95]}
+      demand_level: [0.8, 1.3]
+      pump_speed: [0.92, 1.0]
+    reduced_supply:               # no tank exists in the network, so low supply = smooth drop in source head
+      head: [58, 64]
+      demand_level: [1.0, 1.6]
+      pump_speed: [0.9, 1.0]
+      valve_setting: [42, 55]
+      head_drop_fraction: [0.25, 0.40]
+      drop_start_h: [4, 16]
+      drop_duration_h: [3, 8]
+    pump_degradation:             # full pump stop is excluded: with no tank EPANET leaves the network undefined
+      gradual_share: 0.6          # gradual wear over the day; the rest is a temporary severe slow-down (trip)
+      head: [50, 58]
+      demand_level: [1.0, 1.6]
+      pump_speed: [0.95, 1.0]
+      valve_setting: [42, 55]
+      degrade_start_h: [0, 8]
+      degrade_end_speed: [0.3, 0.8]
+      trip_start_h: [6, 16]
+      trip_duration_h: [2, 6]
+      trip_floor_speed: [0.2, 0.4]
+    partial_blockage:             # blocked fraction of the pipe cross-section area
+      pipes: [P1, P3, P4]
+      blockage_factor: [0.88, 0.95]
+      head: [58, 66]
+      demand_level: [0.8, 1.3]
+      pump_speed: [0.92, 1.0]
+      valve_setting: [42, 55]
+    small_leak:
+      leak_nodes: [J1, J2, J3, J4]
+      leak_lps: [1.0, 3.0]
+      leak_start_h: [2, 18]
+      leak_duration_h: [2, 8]
+      head: [56, 66]
+      demand_level: [0.8, 1.3]
+      pump_speed: [0.92, 1.0]
+      valve_setting: [42, 55]
+    burst_leak:
+      leak_nodes: [J1, J2, J3, J4]
+      leak_lps: [6.5, 9.0]
+      leak_start_h: [2, 18]
+      leak_duration_h: [1, 6]
+      head: [58, 66]
+      demand_level: [0.6, 1.0]
+      pump_speed: [0.95, 1.0]
+      valve_setting: [42, 55]
+
+# ----------------------------------------------------------------------------------------------
+# Phase 3: machine-learning dataset and baselines.
+# Task: from the last `window_steps` steps of sensor/control history, predict the pressure at
+# J2, J3 and J4 `horizon_steps` steps ahead (12 steps = 3 h of history, 1 step = 15 min ahead).
+# ----------------------------------------------------------------------------------------------
+ml:
+  window_steps: 12
+  horizon_steps: 1
+  target_nodes: [J2, J3, J4]
+
+  # Model inputs, in this order. hour_sin / hour_cos are computed from the timestamp of each step.
+  # A listed feature whose column is completely empty (tank_level: this network has no tank) is DROPPED
+  # and recorded in feature_names.json; nothing is invented to fill it ("zero" would fake a tank).
+  input_features:
+    - J1_pressure
+    - J2_pressure
+    - J3_pressure
+    - J4_pressure
+    - P1_flow
+    - P2_flow
+    - P3_flow
+    - P4_flow
+    - J2_demand
+    - J3_demand
+    - J4_demand
+    - tank_level
+    - reservoir_head
+    - pump_speed
+    - pump_status
+    - valve_setting
+    - valve_status
+    - hour_sin
+    - hour_cos
+  unavailable_feature_policy: drop    # drop | error
+  hour_fractional: true               # hour = hour + minute/60 (15-minute steps get distinct values)
+
+  # Hidden simulation truth. These may never be model inputs (they are not measurable by sensors).
+  forbidden_inputs: [leak_flag, leak_severity, scenario_type, scenario_id, timestamp]
+
+  split:
+    train: 0.70
+    val: 0.15
+    test: 0.15
+    seed: null                        # null = use project.seed
+    stratify_by_type: true            # keeps every scenario family in every split; still splits by whole scenario
+
+  random_forest:
+    predict_delta: true               # forest predicts (future - current pressure); the output is converted back to pressure
+    n_estimators: 150
+    min_samples_leaf: 2
+    max_features: 0.5
+    n_jobs: -1
+    lags: [1, 2, 3]                   # pressure lags (steps back) used as features
+    diff_steps: [1, 3]                # differences over this many steps (pressure, flow, demand)
+    rolling_windows: [4, 12]          # rolling mean / std windows (steps)
+
+  # Rule-based baseline: purely REACTIVE. It judges the pressures measured NOW against the thresholds;
+  # it does not forecast anything.
+  evaluation:
+    splits_reported: [train, val, test]
+    comparison_scenarios: 3           # scenarios drawn in the prediction-comparison figure
+
+# Phase 4: the primary deep-learning model (pressure forecasting and decision support, not autonomous control)
+gru:
+  hidden_1: 64                  # first GRU layer
+  hidden_2: 32                  # second GRU layer (its final hidden state feeds the dense head)
+  dropout: 0.20                 # between the two GRU layers
+  dense: 32                     # dense layer with ReLU before the 3 outputs
+  predict_delta: true           # output = change from the current pressure (same trick as the random forest); false = absolute pressure
+  loss: huber                   # huber | mse
+  huber_delta: 1.0              # in standardised units
+  learning_rate: 0.001
+  batch_size: 64                # 32 or 64
+  max_epochs: 100
+  early_stopping_patience: 10
+  min_delta: 0.0              # smallest validation improvement that counts
+  checkpoint_metric: val_mae    # val_mae (metres) | val_loss
+  grad_clip: 1.0
+  scheduler: {factor: 0.5, patience: 4, min_lr: 0.00001}   # ReduceLROnPlateau on the checkpoint metric
+  device: auto                  # auto = GPU if available else CPU | cpu | cuda
+  seed: null                    # null -> project.seed
+  deterministic: true
+
+# ----------------------------------------------------------------------------------------------
+# Phase 8: comparison models. Training settings (loss, lr, batch size, patience, seed, scheduler ...) are inherited from the
+# `gru:` section above, so the three networks are trained identically; only the architecture differs.
+# Sizes are chosen so the parameter counts are close (GRU 26,691 / LSTM 26,723 / TCN ~26k).
+# ----------------------------------------------------------------------------------------------
+lstm:
+  hidden_1: 56
+  hidden_2: 26
+  dropout: 0.20
+  dense: 32
+
+tcn:                            # causal dilated Conv1D residual blocks; receptive field 1 + 2*(k-1)*sum(dilations) = 29 steps
+  channels: 38
+  kernel_size: 3
+  dilations: [1, 2, 4]
+  dropout: 0.10
+  dense: 32
+
+# ----------------------------------------------------------------------------------------------
+# Phase 5: transparent risk engine and bounded recommendation engine (simulated decision support only).
+# Every number below is a configurable LAB-PROTOTYPE value, not a utility standard. Nothing here controls real equipment.
+# ----------------------------------------------------------------------------------------------
+risk:
+  horizon_minutes: 15                 # wording only: "in the next 15-minute interval"
+  nodes: [J2, J3, J4]                 # nodes judged from the forecast
+  # Which metered pipe feeds which demand node (used for the flow-vs-demand consistency check).
+  inflow_pipe: P1                     # all supply passes through P1 (hub inflow)
+  branch_pipes: {J2: P2, J3: P3, J4: P4}
+  hub_node: J1
+  critical_warning_margin_m: 2.0      # J4 forecast within this margin above its critical minimum triggers an early-warning note
+  near_limit_margin_m: 5.0            # distance to a limit at which the "closeness" part of the severity score starts
+  trend_steps: 4                      # steps used for flow / demand trend slopes
+  # Leak-like pattern = pressure drop AND flow/demand inconsistency (mass balance: inflow - metered demand).
+  leak_residual_min_lps: 0.5          # inflow-minus-demand above this is inconsistent ...
+  leak_residual_rel_tol: 0.05         # ... and above this fraction of the inflow (sensor-noise tolerance)
+  burst_residual_min_lps: 4.5         # residual at or above this = burst-like (matches labels.burst_min_lps)
+  pressure_drop_min_m: 0.5            # pressure drop (window maximum minus now, or now minus forecast) that counts as a drop
+  pressure_drop_lookback_steps: 12    # history searched for the drop (the whole window)
+  max_forecast_change_m: 25.0         # a forecast further than this from the current pressure is treated as unreliable
+  tank_low_level_m: null              # set a level to enable a low-tank note; this network has no tank
+  severity:                           # each component is base + (100 - base) * min(1, size / scale), size in metres or L/s
+    low_pressure:      {base: 40, scale_m: 10.0}
+    critical_low_J4:   {base: 55, scale_m: 10.0}
+    high_pressure:     {base: 35, scale_m: 20.0}
+    imbalance:         {base: 30, scale_m: 20.0}
+    leak_like:         {base: 60, scale_lps: 6.0}
+    flow_inconsistency: {base: 40, scale_lps: 6.0}   # inflow/demand mismatch WITHOUT a pressure drop (uncertain)
+    burst_like:        {base: 90, scale_lps: 5.0}
+    closeness_max: 25                 # normal-but-close-to-a-limit scores up to this
+    others_weight: 0.15               # share of the other active components added on top of the largest
+
+recommendation:
+  bounds:                             # recommended values always stay inside these
+    pump_speed:      {min: 0.60, max: 1.10}     # relative to nominal 1.0
+    valve_setting_m: {min: 15.0, max: 90.0}     # PRV downstream pressure setting, metres
+  valve_adjust_pct: [5, 10, 15]       # allowed single-step valve changes (percent of the current setting)
+  pump_increase_pct: [5, 10]
+  pump_decrease_pct: [5]
+  target_margin_m: 0.5                # a fix must land at least this far inside the limit
+  regulating_tolerance_m: 0.5         # J2 within this of the PRV setting = valve is regulating
+  worsen_tolerance_m: 0.05            # a candidate may not make any node's violation worse by more than this
+  confidence:
+    resolves: 0.85
+    partial: 0.50
+    inspect: 0.35
+    leak_like: 0.65
+    burst_like: 0.80
+    unreliable_forecast_penalty: 0.30
+
+# ----------------------------------------------------------------------------------------------
+# Phase 6: EPANET simulated validation of recommendations. Every candidate action is re-simulated in EPANET (WNTR
+# EpanetSimulator) on a fresh copy of the scenario; nothing is judged by the first-order estimate alone.
+# This validates the recommendation in the simulated EPANET network. It is not field validation in an actual water utility.
+# ----------------------------------------------------------------------------------------------
+epanet_validation:
+  horizon_steps: 4                    # steps judged after the decision (4 x 15 min = 1 h); the action is held for all of them
+  valve_candidates_pct: [-15, -10, -5, 0, 5, 10, 15]     # change of the PRV setting
+  pump_candidates_pct: [-10, -5, 0, 5, 10]               # change of the pump speed
+  # objective = high * (high-pressure violation node-steps) + low * (low-pressure violation node-steps)
+  #           + critical_j4 * (J4 critical-low node-steps) + imbalance * (imbalance steps)
+  #           + spread * (mean branch pressure spread, m) + adjustment * |control change| (percentage points)
+  penalties: {high_pressure: 10.0, low_pressure: 10.0, critical_j4: 1000.0, imbalance: 10.0, spread: 1.0, adjustment: 0.1}
+  j4_safety_margin_m: 0.5             # J4 may not be pushed below (critical minimum + margin); if it is already lower it may not drop at all
+  safe_tolerance_m: 0.05              # numerical slack when checking that no node got worse
+  min_improvement: 0.000001           # a change must lower the objective by more than this to count as an improvement
+  inspect_only_for: [leak_like_pattern, burst_like_pattern, uncertain]   # recommendation types that are never answered with a control change
