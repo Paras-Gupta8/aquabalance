@@ -12,7 +12,7 @@ the scenario in EPANET. Sensors measure pressure and flow; they do not equalize 
 (and a limited pressure spread), not equal pressure everywhere.
 
 **EPANET is the mandatory primary hydraulic simulator.** There is no fallback simulator.
-
+# aquabalance is an UG project
 ## Contents
 
 1. [Architecture](#architecture)
